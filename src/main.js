@@ -1040,6 +1040,7 @@ ipcMain.on('close-window', () => {
 // App lifecycle
 // ---------------------------------------------------------------------------
 if (!app.requestSingleInstanceLock()) {
+  console.error(`[${APP_NAME}] another instance holds the single-instance lock; exiting`);
   app.quit();
 } else {
   app.on('second-instance', (e, argv) => {
