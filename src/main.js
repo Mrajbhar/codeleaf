@@ -48,6 +48,8 @@ const DEFAULT_SETTINGS = {
   lastRunCommand: '',
   alwaysOnTop: false,
   sidebarWidth: 240,
+  splitRatio: 0.5,
+  compareSideBySide: true,
   resultsHeight: 200,
   lastMacro: null,
   windowBounds: null,
@@ -738,6 +740,9 @@ function buildMenu() {
       },
       check('Word Wrap', s.wordWrap, cmd('toggle', 'wordWrap'), { accelerator: 'Alt+Z' }),
       { type: 'separator' },
+      { label: 'Move to Other View', click: cmd('moveToOtherView'), enabled: (s.tabCount || 0) > 1 },
+      { label: 'Focus on Another View', accelerator: 'F8', click: cmd('focusOtherView'), enabled: !!s.split || !!s.comparing },
+      { type: 'separator' },
       check('Folder as Workspace', s.showSidebar, cmd('toggle', 'showSidebar')),
       check('Document Map (Minimap)', s.minimap, cmd('toggle', 'minimap')),
       check('Search Results Panel', s.showResults, cmd('toggle', 'showResults'), { accelerator: 'F7' }),
@@ -804,6 +809,24 @@ function buildMenu() {
       { type: 'separator' },
       { label: 'Search on Internet', click: cmd('searchWeb') },
     ],
+  });
+
+  template.push({
+    label: 'Plugins',
+    submenu: [{
+      label: 'Compare',
+      submenu: [
+        { label: 'Compare…', accelerator: 'CmdOrCtrl+Alt+C', click: cmd('compare'), enabled: (s.tabCount || 0) > 1 },
+        { label: 'Compare with Saved Version', accelerator: 'CmdOrCtrl+Alt+D', click: cmd('compareSaved'), enabled: !!s.hasPath },
+        { type: 'separator' },
+        { label: 'Next Difference', accelerator: 'F8', registerAccelerator: false, click: cmd('compareNext'), enabled: !!s.comparing },
+        { label: 'Previous Difference', accelerator: 'Shift+F8', click: cmd('comparePrev'), enabled: !!s.comparing },
+        { label: 'Swap Sides', click: cmd('compareSwap'), enabled: !!s.comparing },
+        check('Side by Side', s.compareSideBySide !== false, cmd('compareToggleMode')),
+        { type: 'separator' },
+        { label: 'Close Compare', accelerator: 'CmdOrCtrl+Alt+X', click: cmd('compareClose'), enabled: !!s.comparing },
+      ],
+    }],
   });
 
   const tabItems = (s.tabs || []).slice(0, 40).map((t, i) =>

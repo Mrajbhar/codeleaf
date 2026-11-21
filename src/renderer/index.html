@@ -8,10 +8,6 @@
 </head>
 <body>
   <div id="toolbar" role="toolbar"></div>
-  <div id="tabbar">
-    <div id="tabs" role="tablist"></div>
-    <button id="tab-new" class="tab-new" title="New tab">+</button>
-  </div>
   <div id="main">
     <aside id="sidebar" hidden>
       <div class="side-header">
@@ -27,7 +23,38 @@
     </aside>
     <div id="sidebar-resizer" class="resizer-v" hidden></div>
     <section id="center">
-      <div id="editor"></div>
+      <div id="views">
+        <section class="view focused" data-view="0">
+          <div class="tabbar">
+            <div class="tabs" role="tablist"></div>
+            <button class="tab-new" title="New tab">+</button>
+          </div>
+          <div class="editor-host"></div>
+        </section>
+        <div id="views-resizer" class="resizer-v" hidden></div>
+        <section class="view" data-view="1" hidden>
+          <div class="tabbar">
+            <div class="tabs" role="tablist"></div>
+            <button class="tab-new" title="New tab">+</button>
+          </div>
+          <div class="editor-host"></div>
+        </section>
+      </div>
+      <section id="compare" hidden>
+        <div class="compare-bar">
+          <span class="cmp-badge">Compare</span>
+          <span id="cmp-title"></span>
+          <span id="cmp-count"></span>
+          <span class="compare-actions">
+            <button class="btn small" data-cmp="comparePrev" title="Previous difference (Shift+F8)">▲ Prev</button>
+            <button class="btn small" data-cmp="compareNext" title="Next difference (F8)">▼ Next</button>
+            <button class="btn small" data-cmp="compareToggleMode" title="Switch between side-by-side and inline">Side by side / Inline</button>
+            <button class="btn small" data-cmp="compareSwap" title="Swap left and right">⇄ Swap</button>
+            <button class="btn small primary" data-cmp="compareClose" title="Close compare">✕ Close</button>
+          </span>
+        </div>
+        <div id="compare-host"></div>
+      </section>
       <div id="results-resizer" class="resizer-h" hidden></div>
       <section id="results" hidden>
         <div class="results-header">

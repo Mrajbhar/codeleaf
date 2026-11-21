@@ -19,7 +19,7 @@
 
   const $ = (sel) => document.querySelector(sel);
   const el = {
-    toolbar: $('#toolbar'), tabs: $('#tabs'), tabbar: $('#tabbar'), editor: $('#editor'),
+    toolbar: $('#toolbar'),
     sidebar: $('#sidebar'), sideResizer: $('#sidebar-resizer'), tree: $('#tree'), sideTitle: $('#side-title'),
     results: $('#results'), resultsResizer: $('#results-resizer'), resultsBody: $('#results-body'), resultsTitle: $('#results-title'),
     status: $('#statusbar'), sbLang: $('#sb-lang'), sbSize: $('#sb-size'), sbPos: $('#sb-pos'), sbEol: $('#sb-eol'),
@@ -220,9 +220,8 @@
     };
   }
 
-  const editor = monaco.editor.create(el.editor, {
+  const EDITOR_BASE = {
     model: null,
-    ...editorOptions(),
     detectIndentation: false,
     automaticLayout: true,
     glyphMargin: true,
@@ -242,11 +241,26 @@
     largeFileOptimizations: true,
     contextmenu: true,
     'semanticHighlighting.enabled': false,
-  });
+  };
+
+  // Two views (main + other), like Notepad++. The second one is only shown when it holds tabs.
+  const viewsEl = $('#views');
+  const viewsResizer = $('#views-resizer');
+  const views = [...document.querySelectorAll('#views .view')].map((root, index) => ({
+    index,
+    root,
+    tabbarEl: root.querySelector('.tabbar'),
+    tabsEl: root.querySelector('.tabs'),
+    editor: monaco.editor.create(root.querySelector('.editor-host'), { ...EDITOR_BASE, ...editorOptions() }),
+    active: null,
+  }));
+  let currentView = 0;
+  let editor = views[0].editor;
   applyTheme();
 
   function applyEditorOptions() {
-    editor.updateOptions(editorOptions());
+    for (const v of views) v.editor.updateOptions(editorOptions());
+    if (cmp) cmp.diff.updateOptions({ ...editorOptions(), minimap: { enabled: false } });
     for (const t of tabs) t.model.updateOptions({ tabSize: settings.tabSize, insertSpaces: settings.insertSpaces });
     updateStatus();
   }
@@ -277,6 +291,8 @@
 
   function isDirty(t) { return t.metaDirty || t.model.getAlternativeVersionId() !== t.savedAlt; }
   function isPristine(t) { return !t.path && !isDirty(t) && t.model.getValueLength() === 0; }
+  const viewTabs = (i) => tabs.filter((x) => x.view === i);
+  const isSplit = () => tabs.some((x) => x.view === 1);
 
   function setModelEol(t) {
     t.model.setEOL(t.eol === 'CRLF' ? monaco.editor.EndOfLineSequence.CRLF : monaco.editor.EndOfLineSequence.LF);
@@ -290,6 +306,7 @@
     model.updateOptions({ tabSize: settings.tabSize, insertSpaces: settings.insertSpaces });
     const t = {
       id, model, untitled,
+      view: o.view === 0 || o.view === 1 ? o.view : currentView,
       path: o.path || null,
       title: o.path ? basename(o.path) : `new ${untitled}`,
       encoding: o.encoding || settings.defaultEncoding || 'utf8',
@@ -307,32 +324,94 @@
     t._lastDirty = isDirty(t);
     model.onDidChangeContent(() => onTabContentChanged(t));
     if (o.bookmarks && o.bookmarks.length) setBookmarks(t, o.bookmarks);
-    const idx = activeTab ? tabs.indexOf(activeTab) + 1 : tabs.length;
+    const idx = activeTab && activeTab.view === t.view ? tabs.indexOf(activeTab) + 1 : tabs.length;
     tabs.splice(o.atEnd ? tabs.length : idx, 0, t);
     return t;
   }
 
-  function newTab() {
-    const t = createTab({});
+  function newTab(view = currentView) {
+    const t = createTab({ view });
     activate(t);
     scheduleSession();
     return t;
   }
 
-  function activate(t, focus = true) {
-    if (!t || t.closed) return;
-    if (activeTab && activeTab !== t && !activeTab.closed) activeTab.viewState = editor.saveViewState();
-    activeTab = t;
-    if (editor.getModel() !== t.model) {
-      editor.setModel(t.model);
-      if (t.viewState) editor.restoreViewState(t.viewState);
+  // Show a tab in its view's editor without changing which view has focus.
+  function showInView(v, t) {
+    if (v.active && v.active !== t && !v.active.closed) v.active.viewState = v.editor.saveViewState();
+    v.active = t || null;
+    if (!t) { v.editor.setModel(null); return; }
+    if (v.editor.getModel() !== t.model) {
+      v.editor.setModel(t.model);
+      if (t.viewState) v.editor.restoreViewState(t.viewState);
     }
-    editor.updateOptions({ readOnly: t.readOnly });
+    v.editor.updateOptions({ readOnly: t.readOnly });
+  }
+
+  function setFocusedView(i) {
+    currentView = i;
+    editor = views[i].editor;
+    activeTab = views[i].active;
+    for (const v of views) v.root.classList.toggle('focused', v.index === i);
+  }
+
+  function focusView(i) {
+    if (i === currentView || !views[i].active) return;
+    setFocusedView(i);
     renderTabs();
     updateStatus();
     updateWindowState();
     scheduleSession();
-    if (focus) editor.focus();
+  }
+
+  // Keep the views consistent: the main view is never empty while the other view has tabs,
+  // and the other view is hidden when it has none.
+  function layoutViews() {
+    if (!viewTabs(0).length && viewTabs(1).length) {
+      const a = views[1].active;
+      showInView(views[1], null);
+      for (const x of tabs) x.view = 0;
+      showInView(views[0], a && !a.closed ? a : tabs[0]);
+      if (currentView === 1) setFocusedView(0);
+    }
+    const split = isSplit();
+    views[1].root.hidden = !split;
+    viewsResizer.hidden = !split;
+    viewsEl.classList.toggle('split', split);
+    if (!split && views[1].active) showInView(views[1], null);
+    if (!split && currentView === 1) setFocusedView(0);
+    views[0].root.style.flex = split ? `0 0 ${Math.round((settings.splitRatio || 0.5) * 1000) / 10}%` : '';
+  }
+
+  function activate(t, focus = true) {
+    if (!t || t.closed) return;
+    showInView(views[t.view], t);
+    setFocusedView(t.view);
+    layoutViews();
+    renderTabs();
+    updateStatus();
+    updateWindowState();
+    scheduleSession();
+    if (focus && !cmp) editor.focus();
+  }
+
+  // Before a tab leaves its view, show a neighbour in its place.
+  function detachFromView(t) {
+    const v = views[t.view];
+    if (v.active !== t) return;
+    const list = viewTabs(t.view);
+    const i = list.indexOf(t);
+    const rest = list.filter((x) => x !== t);
+    showInView(v, rest[i] || rest[i - 1] || null);
+  }
+
+  function moveToOtherView(t) {
+    if (!t || tabs.length < 2) return;
+    detachFromView(t);
+    t.view = 1 - t.view;
+    tabs.splice(tabs.indexOf(t), 1);
+    tabs.push(t);
+    activate(t);
   }
 
   function refreshDirty(t) {
@@ -363,19 +442,21 @@
       if (r === 2) return false;
       if (r === 0 && !(await saveTab(t))) return false;
     }
-    const idx = tabs.indexOf(t);
-    if (idx < 0) return true;
+    if (tabs.indexOf(t) < 0) return true;
+    if (cmp && cmp.uses(t.model)) closeCompare();
     if (t.path) { closedStack.push(t.path); if (closedStack.length > 50) closedStack.shift(); }
-    tabs.splice(idx, 1);
+    const wasFocused = activeTab === t;
+    detachFromView(t);
+    tabs.splice(tabs.indexOf(t), 1);
     t.closed = true;
-    if (activeTab === t) {
-      activeTab = null;
-      const next = tabs[idx] || tabs[idx - 1];
-      if (next) activate(next);
-      else editor.setModel(null);
-    }
     t.model.dispose();
-    if (!tabs.length && !opts.noReplace) newTab();
+    layoutViews();
+    if (!tabs.length) {
+      activeTab = null;
+      if (!opts.noReplace) newTab(0);
+    } else if (wasFocused || !activeTab || activeTab.closed) {
+      activate(views[currentView].active || views[0].active || tabs[0], wasFocused);
+    }
     renderTabs();
     syncWatch();
     scheduleSession();
@@ -389,66 +470,93 @@
 
   // ---- tab bar rendering ----
   let dragTabId = null;
+
+  function dropTab(moving, target, viewIndex) {
+    if (!moving || moving === target) return;
+    const changedView = moving.view !== viewIndex;
+    if (changedView) detachFromView(moving);
+    tabs.splice(tabs.indexOf(moving), 1);
+    if (target) tabs.splice(tabs.indexOf(target), 0, moving); else tabs.push(moving);
+    moving.view = viewIndex;
+    if (changedView) activate(moving); else renderTabs();
+    scheduleSession();
+  }
+
   function renderTabs() {
-    const frag = document.createDocumentFragment();
-    let activeEl = null;
-    for (const t of tabs) {
-      const div = document.createElement('div');
-      div.className = 'tab' + (t === activeTab ? ' active' : '') + (isDirty(t) ? ' dirty' : '') + (t.readOnly ? ' readonly' : '');
-      div.title = t.path || t.title;
-      div.draggable = true;
-      div.dataset.id = t.id;
-      div.setAttribute('role', 'tab');
-      div.innerHTML = `<span class="disk">${ICONS.disk}</span><span class="name"></span><button class="close" title="Close" tabindex="-1">✕</button>`;
-      div.querySelector('.name').textContent = t.title;
-      div.addEventListener('mousedown', (e) => { if (e.button === 0 && !e.target.closest('.close')) activate(t); });
-      div.addEventListener('auxclick', (e) => { if (e.button === 1) { e.preventDefault(); closeTab(t); } });
-      div.querySelector('.close').addEventListener('click', (e) => { e.stopPropagation(); closeTab(t); });
-      div.addEventListener('dblclick', (e) => { if (!e.target.closest('.close')) closeTab(t); });
-      div.addEventListener('contextmenu', (e) => { e.preventDefault(); tabContextMenu(t, e); });
-      div.addEventListener('dragstart', (e) => { dragTabId = t.id; e.dataTransfer.setData('text/x-nodepad-tab', String(t.id)); e.dataTransfer.effectAllowed = 'move'; });
-      div.addEventListener('dragend', () => { dragTabId = null; });
-      div.addEventListener('dragover', (e) => { if (dragTabId != null) { e.preventDefault(); div.classList.add('drag-over'); } });
-      div.addEventListener('dragleave', () => div.classList.remove('drag-over'));
-      div.addEventListener('drop', (e) => {
-        div.classList.remove('drag-over');
-        if (dragTabId == null) return;
-        e.preventDefault();
-        const from = tabs.findIndex((x) => x.id === dragTabId);
-        const moving = tabs[from];
-        if (!moving || moving === t) return;
-        tabs.splice(from, 1);
-        tabs.splice(tabs.indexOf(t), 0, moving);
-        renderTabs();
-        scheduleSession();
-      });
-      if (t === activeTab) activeEl = div;
-      frag.appendChild(div);
+    const split = isSplit();
+    for (const v of views) {
+      const frag = document.createDocumentFragment();
+      let activeEl = null;
+      for (const t of viewTabs(v.index)) {
+        const div = document.createElement('div');
+        div.className = 'tab' + (t === v.active ? ' active' : '') + (isDirty(t) ? ' dirty' : '') + (t.readOnly ? ' readonly' : '');
+        div.title = t.path || t.title;
+        div.draggable = true;
+        div.dataset.id = t.id;
+        div.setAttribute('role', 'tab');
+        div.innerHTML = `<span class="disk">${ICONS.disk}</span><span class="name"></span><button class="close" title="Close" tabindex="-1">✕</button>`;
+        div.querySelector('.name').textContent = t.title;
+        div.addEventListener('mousedown', (e) => { if (e.button === 0 && !e.target.closest('.close')) activate(t); });
+        div.addEventListener('auxclick', (e) => { if (e.button === 1) { e.preventDefault(); closeTab(t); } });
+        div.querySelector('.close').addEventListener('click', (e) => { e.stopPropagation(); closeTab(t); });
+        div.addEventListener('dblclick', (e) => { if (!e.target.closest('.close')) closeTab(t); });
+        div.addEventListener('contextmenu', (e) => { e.preventDefault(); tabContextMenu(t, e); });
+        div.addEventListener('dragstart', (e) => { dragTabId = t.id; e.dataTransfer.setData('text/x-nodepad-tab', String(t.id)); e.dataTransfer.effectAllowed = 'move'; });
+        div.addEventListener('dragend', () => { dragTabId = null; });
+        div.addEventListener('dragover', (e) => { if (dragTabId != null) { e.preventDefault(); div.classList.add('drag-over'); } });
+        div.addEventListener('dragleave', () => div.classList.remove('drag-over'));
+        div.addEventListener('drop', (e) => {
+          div.classList.remove('drag-over');
+          if (dragTabId == null) return;
+          e.preventDefault();
+          e.stopPropagation();
+          dropTab(tabs.find((x) => x.id === dragTabId), t, v.index);
+        });
+        if (t === v.active) activeEl = div;
+        frag.appendChild(div);
+      }
+      v.tabsEl.replaceChildren(frag);
+      v.root.classList.toggle('focused', v.index === currentView);
+      if (activeEl) activeEl.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     }
-    el.tabs.replaceChildren(frag);
-    if (activeEl) activeEl.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    viewsEl.classList.toggle('split', split);
     pushEditorState();
   }
 
-  el.tabs.addEventListener('dblclick', (e) => { if (e.target === el.tabs) newTab(); });
-  el.tabbar.addEventListener('dblclick', (e) => { if (e.target === el.tabbar) newTab(); });
-  $('#tab-new').addEventListener('click', () => newTab());
-  el.tabs.addEventListener('wheel', (e) => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) el.tabs.scrollLeft += e.deltaY; }, { passive: true });
+  for (const v of views) {
+    v.tabsEl.addEventListener('dblclick', (e) => { if (e.target === v.tabsEl) newTab(v.index); });
+    v.tabbarEl.addEventListener('dblclick', (e) => { if (e.target === v.tabbarEl) newTab(v.index); });
+    v.root.querySelector('.tab-new').addEventListener('click', () => newTab(v.index));
+    v.tabsEl.addEventListener('wheel', (e) => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) v.tabsEl.scrollLeft += e.deltaY; }, { passive: true });
+    // dropping a tab on the empty part of a tab bar moves it to the end of that view
+    v.tabbarEl.addEventListener('dragover', (e) => { if (dragTabId != null) e.preventDefault(); });
+    v.tabbarEl.addEventListener('drop', (e) => {
+      if (dragTabId == null) return;
+      e.preventDefault();
+      dropTab(tabs.find((x) => x.id === dragTabId), null, v.index);
+    });
+    v.editor.onDidFocusEditorWidget(() => focusView(v.index));
+  }
 
   async function tabContextMenu(t, e) {
     activate(t, false);
-    const i = tabs.indexOf(t);
+    const list = viewTabs(t.view);
+    const i = list.indexOf(t);
     const items = [
       { id: 'close', label: 'Close' },
-      { id: 'closeOthers', label: 'Close All but This', enabled: tabs.length > 1 },
+      { id: 'closeOthers', label: 'Close All but This', enabled: list.length > 1 },
       { id: 'closeLeft', label: 'Close All to the Left', enabled: i > 0 },
-      { id: 'closeRight', label: 'Close All to the Right', enabled: i < tabs.length - 1 },
+      { id: 'closeRight', label: 'Close All to the Right', enabled: i < list.length - 1 },
       { id: 'closeUnchanged', label: 'Close All Unchanged' },
       { type: 'separator' },
       { id: 'save', label: 'Save' },
       { id: 'saveAs', label: 'Save As…' },
       { id: 'rename', label: 'Rename…' },
       { id: 'reload', label: 'Reload from Disk', enabled: !!t.path },
+      { type: 'separator' },
+      { id: 'moveToOtherView', label: t.view === 0 ? 'Move to Other View' : 'Move to Main View', enabled: tabs.length > 1 },
+      { id: 'compare', label: 'Compare with…', enabled: tabs.length > 1 },
+      { id: 'compareSaved', label: 'Compare with Saved Version', enabled: !!t.path },
       { type: 'separator' },
       { id: 'copyPath', label: 'Copy Full File Path', enabled: !!t.path },
       { id: 'copyName', label: 'Copy Filename' },
@@ -462,6 +570,117 @@
     const id = await api.invoke('popup-menu', items, { x: e.clientX, y: e.clientY });
     if (id) runCommand(id);
   }
+
+  // -------------------------------------------------------------------------
+  // Compare (side-by-side diff)
+  // -------------------------------------------------------------------------
+  const cmpEl = { root: $('#compare'), host: $('#compare-host'), title: $('#cmp-title'), count: $('#cmp-count') };
+  let cmp = null;
+  const tabLabel = (t) => (t.path ? basename(t.path) : t.title);
+
+  function openCompare(original, modified, leftLabel, rightLabel, temp = []) {
+    if (cmp) closeCompare();
+    const diff = monaco.editor.createDiffEditor(cmpEl.host, {
+      ...EDITOR_BASE,
+      ...editorOptions(),
+      minimap: { enabled: false },
+      glyphMargin: false,
+      renderSideBySide: settings.compareSideBySide !== false,
+      useInlineViewWhenSpaceIsLimited: false,
+      originalEditable: true,
+      ignoreTrimWhitespace: false,
+      renderIndicators: true,
+      enableSplitViewResizing: true,
+    });
+    diff.setModel({ original, modified });
+    cmp = { diff, temp, labels: [leftLabel, rightLabel], first: true, uses: (m) => m === original || m === modified };
+    cmpEl.title.textContent = `${leftLabel}   ⟷   ${rightLabel}`;
+    cmpEl.count.textContent = 'Comparing…';
+    cmpEl.root.classList.remove('identical');
+    viewsEl.hidden = true;
+    cmpEl.root.hidden = false;
+    diff.onDidUpdateDiff(() => {
+      if (!cmp || cmp.diff !== diff) return;
+      const n = (diff.getLineChanges() || []).length;
+      cmpEl.count.textContent = n ? `${n} difference${n === 1 ? '' : 's'}` : 'Files are identical';
+      cmpEl.root.classList.toggle('identical', n === 0);
+      if (cmp.first && n) { cmp.first = false; goDiff(1); }
+    });
+    diff.getModifiedEditor().focus();
+    pushEditorState();
+  }
+
+  function goDiff(dir) {
+    if (!cmp) return;
+    const d = cmp.diff;
+    const changes = d.getLineChanges() || [];
+    if (!changes.length) return;
+    const ed = d.getModifiedEditor();
+    const line = (ed.getPosition() || { lineNumber: 0 }).lineNumber;
+    const starts = changes.map((c) => Math.max(1, c.modifiedEndLineNumber === 0 ? c.modifiedStartLineNumber : c.modifiedStartLineNumber));
+    const target = dir > 0
+      ? (starts.find((s) => s > line) ?? starts[0])
+      : ([...starts].reverse().find((s) => s < line) ?? starts[starts.length - 1]);
+    ed.setPosition({ lineNumber: target, column: 1 });
+    ed.revealLineInCenter(target);
+    ed.focus();
+  }
+
+  function closeCompare() {
+    if (!cmp) return;
+    const c = cmp;
+    cmp = null;
+    c.diff.setModel(null);
+    c.diff.dispose();
+    for (const m of c.temp) m.dispose();
+    cmpEl.root.hidden = true;
+    viewsEl.hidden = false;
+    if (activeTab) editor.focus();
+    pushEditorState();
+  }
+
+  function swapCompare() {
+    if (!cmp) return;
+    const m = cmp.diff.getModel();
+    cmp.diff.setModel({ original: m.modified, modified: m.original });
+    cmp.labels.reverse();
+    cmpEl.title.textContent = `${cmp.labels[0]}   ⟷   ${cmp.labels[1]}`;
+  }
+
+  async function compareCommand(mode) {
+    const t = activeTab;
+    if (!t) return;
+    if (mode === 'saved') {
+      if (!t.path) { await alertBox('Compare', 'This document has not been saved to disk yet.'); return; }
+      const r = await api.invoke('read-file', t.path, t.encoding);
+      if (r.error) { await alertBox('Compare', r.error); return; }
+      const disk = monaco.editor.createModel(r.text, t.model.getLanguageId());
+      openCompare(disk, t.model, `${tabLabel(t)} (saved on disk)`, `${tabLabel(t)} (current)`, [disk]);
+      return;
+    }
+    if (isSplit() && views[0].active && views[1].active) {
+      const a = views[0].active, b = views[1].active;
+      openCompare(a.model, b.model, tabLabel(a), tabLabel(b));
+      return;
+    }
+    const others = tabs.filter((x) => x !== t);
+    if (!others.length) { await alertBox('Compare', 'Open another file to compare with.'); return; }
+    let pick = others.length === 1 ? others[0] : null;
+    if (!pick) {
+      const id = await openModal('Compare',
+        `<div class="row full"><label>Compare "${escapeHtml(tabLabel(t))}" with:</label>
+         <select id="cmp-pick">${others.map((o) => `<option value="${o.id}">${escapeHtml(o.path || o.title)}</option>`).join('')}</select></div>`,
+        [{ label: 'Cancel', value: null },
+          { label: 'Compare', primary: true, onClick: (ctx) => ctx.close(Number(ctx.box.querySelector('#cmp-pick').value)) }]);
+      pick = tabs.find((x) => x.id === id);
+    }
+    if (pick) openCompare(pick.model, t.model, tabLabel(pick), tabLabel(t));
+  }
+
+  cmpEl.root.querySelector('.compare-actions').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (b) runCommand(b.dataset.cmp);
+  });
 
   // -------------------------------------------------------------------------
   // Status bar & window state
@@ -521,6 +740,7 @@
       showLineNumbers: settings.showLineNumbers, highlightCurrentLine: settings.highlightCurrentLine, minimap: settings.minimap,
       showSidebar: settings.showSidebar, showResults: settings.showResults, showToolbar: settings.showToolbar, showStatusBar: settings.showStatusBar,
       tabs: tabs.map((x) => ({ id: x.id, title: (isDirty(x) ? '*' : '') + x.title, active: x === activeTab })),
+      tabCount: tabs.length, split: isSplit(), comparing: !!cmp, compareSideBySide: settings.compareSideBySide !== false,
     };
     const json = JSON.stringify(s);
     if (json === lastStateJson) return;
@@ -529,7 +749,7 @@
     updateToolbarState();
   }, 60);
 
-  editor.onDidChangeCursorSelection(scheduleStatus);
+  for (const v of views) v.editor.onDidChangeCursorSelection(() => { if (v.index === currentView) scheduleStatus(); });
 
   async function statusPopup(e, items) {
     const r = e.currentTarget.getBoundingClientRect();
@@ -971,11 +1191,14 @@
       }
     }
   }
-  editor.onMouseDown((e) => {
-    if (e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN && e.target.position) {
-      toggleBookmark(e.target.position.lineNumber);
-    }
-  });
+  for (const v of views) {
+    v.editor.onMouseDown((e) => {
+      if (e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN && e.target.position && v.active) {
+        focusView(v.index);
+        toggleBookmark(e.target.position.lineNumber);
+      }
+    });
+  }
 
   // -------------------------------------------------------------------------
   // Macros
@@ -1004,15 +1227,17 @@
     if (be.key.length === 1 && !be.ctrlKey && !be.metaKey) return { type: 'type', text: be.key };
     return null;
   }
-  editor.onKeyDown((e) => {
-    if (!state.macroRecording) return;
-    const step = macroStepFromKey(e);
-    if (step) state.macroSteps.push(step);
-  });
-  editor.onDidPaste((e) => {
-    if (!state.macroRecording || !model()) return;
-    state.macroSteps.push({ type: 'type', text: model().getValueInRange(e.range) });
-  });
+  for (const v of views) {
+    v.editor.onKeyDown((e) => {
+      if (!state.macroRecording) return;
+      const step = macroStepFromKey(e);
+      if (step) state.macroSteps.push(step);
+    });
+    v.editor.onDidPaste((e) => {
+      if (!state.macroRecording || !v.active) return;
+      state.macroSteps.push({ type: 'type', text: v.active.model.getValueInRange(e.range) });
+    });
+  }
 
   const MACRO_RECORDABLE = new Set(['ed', 'lines', 'blank', 'transform', 'insertDate', 'sentenceCase', 'invertCase', 'splitLines', 'bookmark']);
 
@@ -1138,9 +1363,9 @@
       case 'rename': await renameTab(t); break;
       case 'close': await closeTab(t); break;
       case 'closeAll': await closeMany([...tabs]); break;
-      case 'closeOthers': await closeMany(tabs.filter((x) => x !== t)); break;
-      case 'closeLeft': await closeMany(tabs.slice(0, tabs.indexOf(t))); break;
-      case 'closeRight': await closeMany(tabs.slice(tabs.indexOf(t) + 1)); break;
+      case 'closeOthers': await closeMany(viewTabs(t.view).filter((x) => x !== t)); break;
+      case 'closeLeft': { const l = viewTabs(t.view); await closeMany(l.slice(0, l.indexOf(t))); break; }
+      case 'closeRight': { const l = viewTabs(t.view); await closeMany(l.slice(l.indexOf(t) + 1)); break; }
       case 'closeUnchanged': await closeMany(tabs.filter((x) => !isDirty(x))); break;
       case 'reveal': if (t && t.path) api.send('reveal', t.path); break;
       case 'terminal': api.send('open-terminal', t && t.path ? dirname(t.path) : lastDir()); break;
@@ -1195,7 +1420,7 @@
       case 'toggleReadOnly':
         if (!t) break;
         t.readOnly = !t.readOnly;
-        editor.updateOptions({ readOnly: t.readOnly });
+        for (const v of views) if (v.active === t) v.editor.updateOptions({ readOnly: t.readOnly });
         renderTabs(); updateStatus();
         break;
 
@@ -1234,15 +1459,35 @@
 
       // Window
       case 'activateTab': activate(tabs.find((x) => x.id === arg)); break;
-      case 'nextTab': if (tabs.length > 1) activate(tabs[(tabs.indexOf(t) + 1) % tabs.length]); break;
-      case 'prevTab': if (tabs.length > 1) activate(tabs[(tabs.indexOf(t) - 1 + tabs.length) % tabs.length]); break;
+      case 'nextTab': case 'prevTab': {
+        const l = viewTabs(t.view);
+        if (l.length > 1) activate(l[(l.indexOf(t) + (cmd === 'nextTab' ? 1 : -1) + l.length) % l.length]);
+        break;
+      }
       case 'moveTab': {
-        const i = tabs.indexOf(t), j = i + arg;
-        if (j < 0 || j >= tabs.length) break;
-        [tabs[i], tabs[j]] = [tabs[j], tabs[i]];
+        const l = viewTabs(t.view), j = l.indexOf(t) + arg;
+        if (j < 0 || j >= l.length) break;
+        const a = tabs.indexOf(t), b = tabs.indexOf(l[j]);
+        [tabs[a], tabs[b]] = [tabs[b], tabs[a]];
         renderTabs(); scheduleSession();
         break;
       }
+      case 'moveToOtherView': moveToOtherView(t); break;
+      case 'focusOtherView':
+        if (cmp) goDiff(1);
+        else if (isSplit()) activate(views[1 - currentView].active);
+        break;
+      case 'compare': await compareCommand('tabs'); break;
+      case 'compareSaved': await compareCommand('saved'); break;
+      case 'compareNext': goDiff(1); break;
+      case 'comparePrev': goDiff(-1); break;
+      case 'compareSwap': swapCompare(); break;
+      case 'compareClose': closeCompare(); break;
+      case 'compareToggleMode':
+        settings.compareSideBySide = settings.compareSideBySide === false;
+        if (cmp) cmp.diff.updateOptions({ renderSideBySide: settings.compareSideBySide });
+        saveSettings(); pushEditorState();
+        break;
       case 'sortTabs': {
         const key = (x) => (arg === 'path' ? (x.path || '~' + x.title) : x.title).toLowerCase();
         tabs.sort((a, b) => key(a).localeCompare(key(b)));
@@ -1276,6 +1521,8 @@
       [C | S | KC.KeyT, 'reopenClosed'],
       [C | KC.KeyP, 'print'],
       [C | S | KC.KeyD, 'toggleTheme'],
+      [KC.F8, 'focusOtherView'],
+      [S | KC.F8, 'comparePrev'],
     ];
     const perPlatform = isMac ? [
       [C | KC.KeyL, 'ed', 'editor.action.gotoLine'],
@@ -1293,7 +1540,7 @@
       [C | S | KC.DownArrow, 'ed', 'editor.action.moveLinesDownAction'],
       [C | KC.KeyY, 'redo'],
     ];
-    for (const [keys, cmd, arg] of [...common, ...perPlatform]) editor.addCommand(keys, () => runCommand(cmd, arg));
+    for (const v of views) for (const [keys, cmd, arg] of [...common, ...perPlatform]) v.editor.addCommand(keys, () => runCommand(cmd, arg));
   }
 
   // Global shortcuts not tied to the editor
@@ -1390,6 +1637,11 @@
     const bottom = el.status.hidden ? window.innerHeight : el.status.getBoundingClientRect().top;
     settings.resultsHeight = Math.max(60, Math.min(window.innerHeight - 200, bottom - e.clientY));
     el.results.style.height = settings.resultsHeight + 'px';
+  });
+  makeResizer(viewsResizer, (e) => {
+    const r = viewsEl.getBoundingClientRect();
+    settings.splitRatio = Math.max(0.15, Math.min(0.85, (e.clientX - r.left) / r.width));
+    layoutViews();
   });
 
   // ---- Folder as Workspace ----
@@ -1914,6 +2166,11 @@
         ['Search Results Panel', 'F7'], ['Next / Previous Tab', k('Ctrl+Tab / ⌥⌘→', 'Ctrl+Tab / Ctrl+Shift+Tab')], ['Go to Tab 1–9', M + '1…9'],
         ['Command Palette', 'F1'], ['Toggle Dark / Light Mode', SH + M + 'D'],
       ],
+      'Split View & Compare': [
+        ['Move Tab to Other View', 'right-click tab, or drag it'], ['Focus on Another View', 'F8'],
+        ['Compare Files', `${M}${AL}C`], ['Compare with Saved Version', `${M}${AL}D`],
+        ['Next / Previous Difference', 'F8 / Shift+F8'], ['Close Compare', `${M}${AL}X`],
+      ],
       Macro: [['Start Recording', SH + M + 'R'], ['Playback', SH + M + 'P'], ['Run', 'F5']],
     };
     let html = '<table class="kbd-table">';
@@ -1955,6 +2212,8 @@
           bookmarks: bookmarkLines(t),
           readOnly: t.readOnly,
           mtime: t.mtime,
+          view: t.view,
+          viewActive: views[t.view].active === t,
         };
       }),
     };
@@ -1966,17 +2225,18 @@
   async function restoreSession(session) {
     if (!session || !Array.isArray(session.tabs)) return;
     let active = null;
+    const viewActive = [null, null];
     for (let i = 0; i < session.tabs.length; i++) {
       const st = session.tabs[i];
       let t = null;
       if (st.path && !st.dirty) {
         const r = await api.invoke('read-file', st.path, st.encoding && !st.encoding.startsWith('utf') ? st.encoding : undefined);
         if (r.error) continue;
-        t = createTab({ path: st.path, text: r.text, encoding: r.encoding, eol: r.eol || st.eol, mtime: r.mtime, language: st.language, atEnd: true });
+        t = createTab({ path: st.path, text: r.text, encoding: r.encoding, eol: r.eol || st.eol, mtime: r.mtime, language: st.language, atEnd: true, view: st.view === 1 ? 1 : 0 });
       } else if (typeof st.text === 'string') {
         t = createTab({
           path: st.path, untitled: st.untitled, text: st.text, encoding: st.encoding, eol: st.eol,
-          language: st.language, mtime: st.mtime, dirty: !!st.dirty || (!st.path && st.text.length > 0), atEnd: true,
+          language: st.language, mtime: st.mtime, dirty: !!st.dirty || (!st.path && st.text.length > 0), atEnd: true, view: st.view === 1 ? 1 : 0,
         });
         if (!st.path && st.title) t.title = st.title;
       }
@@ -1985,8 +2245,13 @@
       t.viewState = st.viewState || null;
       if (st.bookmarks && st.bookmarks.length) setBookmarks(t, st.bookmarks);
       if (i === session.activeIndex) active = t;
+      if (st.viewActive) viewActive[t.view] = t;
     }
-    if (tabs.length) activate(active || tabs[tabs.length - 1], false);
+    for (const i of [0, 1]) {
+      const a = viewActive[i] && viewActive[i].view === i ? viewActive[i] : viewTabs(i)[0];
+      if (a) showInView(views[i], a);
+    }
+    if (tabs.length) activate(active || views[0].active || tabs[tabs.length - 1], false);
   }
 
   let allowClose = false;
@@ -2029,7 +2294,7 @@
   updateStatus();
   updateWindowState();
   $('#loading').remove();
-  if (init.smoke) window.__np = { execute, tabs, editor, settings, state, bookmarkLines, get active() { return activeTab; }, isDirty, monaco };
+  if (init.smoke) window.__np = { execute, tabs, editor, settings, state, bookmarkLines, get active() { return activeTab; }, get comparing() { return !!cmp; }, views, isDirty, monaco };
   editor.focus();
 })().catch((err) => {
   console.error(err);

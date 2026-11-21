@@ -44,6 +44,10 @@ SmartScreen shows **More info → Run anyway** the first time.
 - **Encodings**: UTF-8, UTF-8-BOM, UTF-16 LE/BE, ANSI and 20+ character sets (convert or reopen with)
 - **End of line**: Windows (CR LF), Unix (LF), Macintosh (CR)
 - **Macros**: record, playback, and run N times or until end of file
+- **Split view**: two views side by side, like Notepad++. Right-click a tab → *Move to Other
+  View*, or drag it to the other tab bar; F8 switches between views
+- **Compare** (Plugins → Compare): side-by-side or inline diff of two files, or of a file against
+  its saved version, with next/previous difference (F8 / Shift+F8)
 - **Folder as Workspace** sidebar, Document Map (minimap), column / multi-cursor editing
 - **Detects changes from other programs**, plus read-only mode, zoom and print
 - **Run** menu with `$(FULL_CURRENT_PATH)`-style variables; launch in browser; open in Terminal or Finder/Explorer
