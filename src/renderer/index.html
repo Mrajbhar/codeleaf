@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nodepad++</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="toolbar" role="toolbar"></div>
+  <div id="tabbar">
+    <div id="tabs" role="tablist"></div>
+    <button id="tab-new" class="tab-new" title="New tab">+</button>
+  </div>
+  <div id="main">
+    <aside id="sidebar" hidden>
+      <div class="side-header">
+        <span id="side-title">Folder as Workspace</span>
+        <span class="side-actions">
+          <button data-side="open" title="Open folder">📂</button>
+          <button data-side="refresh" title="Refresh">⟳</button>
+          <button data-side="collapse" title="Collapse all">⊟</button>
+          <button data-side="close" title="Close panel">✕</button>
+        </span>
+      </div>
+      <div id="tree" tabindex="0"></div>
+    </aside>
+    <div id="sidebar-resizer" class="resizer-v" hidden></div>
+    <section id="center">
+      <div id="editor"></div>
+      <div id="results-resizer" class="resizer-h" hidden></div>
+      <section id="results" hidden>
+        <div class="results-header">
+          <span id="results-title">Search results</span>
+          <span class="side-actions">
+            <button data-results="collapse" title="Collapse all">⊟</button>
+            <button data-results="clear" title="Clear">⌫</button>
+            <button data-results="close" title="Close">✕</button>
+          </span>
+        </div>
+        <div id="results-body" tabindex="0"></div>
+      </section>
+    </section>
+  </div>
+  <footer id="statusbar">
+    <span id="sb-lang" class="sb-item clickable" title="Change language"></span>
+    <span id="sb-size" class="sb-item"></span>
+    <span id="sb-pos" class="sb-item"></span>
+    <span class="sb-spacer"></span>
+    <span id="sb-macro" class="sb-item" hidden>● REC</span>
+    <span id="sb-indent" class="sb-item clickable" title="Indentation"></span>
+    <span id="sb-eol" class="sb-item clickable" title="Change end of line"></span>
+    <span id="sb-enc" class="sb-item clickable" title="Change encoding"></span>
+    <span id="sb-mode" class="sb-item"></span>
+  </footer>
+  <div id="modal-root"></div>
+  <div id="loading">Loading…</div>
+
+  <script src="../../node_modules/monaco-editor/min/vs/loader.js"></script>
+  <script src="icons.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

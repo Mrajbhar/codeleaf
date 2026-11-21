@@ -1,0 +1,152 @@
+{
+  "name": "nodepad-plus-plus",
+  "productName": "Nodepad++",
+  "version": "1.0.0",
+  "description": "A fast, tabbed source code editor for macOS (Apple Silicon) and Windows",
+  "main": "src/main.js",
+  "author": "Nodepad++",
+  "license": "MIT",
+  "private": true,
+  "dependencies": {
+    "iconv-lite": "^0.7.3",
+    "monaco-editor": "^0.52.2"
+  },
+  "devDependencies": {
+    "electron": "^45.4.1",
+    "electron-builder": "^26.18.0"
+  },
+  "scripts": {
+    "start": "electron .",
+    "dist:mac": "electron-builder --mac --arm64",
+    "dist:mac-intel": "electron-builder --mac --x64",
+    "dist:win": "electron-builder --win --x64 --arm64",
+    "dist": "electron-builder --mac --arm64 && electron-builder --win --x64 --arm64",
+    "prestart": "node scripts/dev-branding.js",
+    "postinstall": "node scripts/dev-branding.js"
+  },
+  "build": {
+    "appId": "com.nodepadplusplus.editor",
+    "productName": "Nodepad++",
+    "copyright": "Nodepad++",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "!node_modules/monaco-editor/{esm,dev,min-maps}/**",
+      "!node_modules/monaco-editor/**/*.d.ts",
+      "!node_modules/monaco-editor/*.md"
+    ],
+    "afterPack": "build/afterPack.js",
+    "fileAssociations": [
+      {
+        "ext": [
+          "txt",
+          "log",
+          "md",
+          "markdown",
+          "ini",
+          "cfg",
+          "conf",
+          "json",
+          "xml",
+          "yaml",
+          "yml",
+          "toml",
+          "csv",
+          "js",
+          "mjs",
+          "cjs",
+          "ts",
+          "tsx",
+          "jsx",
+          "css",
+          "scss",
+          "less",
+          "html",
+          "htm",
+          "php",
+          "py",
+          "rb",
+          "pl",
+          "lua",
+          "go",
+          "rs",
+          "java",
+          "kt",
+          "swift",
+          "c",
+          "h",
+          "cpp",
+          "hpp",
+          "cc",
+          "cs",
+          "sh",
+          "bash",
+          "zsh",
+          "ps1",
+          "bat",
+          "cmd",
+          "sql",
+          "r",
+          "dart",
+          "vue",
+          "svelte",
+          "diff",
+          "patch",
+          "properties",
+          "env",
+          "gitignore"
+        ],
+        "name": "Text Document",
+        "role": "Editor",
+        "rank": "Alternate"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png",
+      "identity": null,
+      "hardenedRuntime": false,
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "dmg": {
+      "title": "Nodepad++"
+    },
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "signExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Nodepad++"
+    }
+  }
+}

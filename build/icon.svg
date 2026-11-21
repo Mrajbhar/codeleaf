@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3d8bfd"/><stop offset="1" stop-color="#1f5fc9"/></linearGradient>
+    <linearGradient id="pg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#e9eef7"/></linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+  <rect x="250" y="190" width="460" height="620" rx="40" fill="url(#pg)"/>
+  <g fill="#c4cfe0"><rect x="300" y="300" width="300" height="26" rx="13"/><rect x="300" y="370" width="360" height="26" rx="13"/><rect x="300" y="440" width="250" height="26" rx="13"/><rect x="300" y="510" width="320" height="26" rx="13"/></g>
+  <g fill="#f5a623"><rect x="560" y="600" width="230" height="56" rx="20"/><rect x="647" y="513" width="56" height="230" rx="20"/></g>
+  <g fill="#f5a623" opacity=".85"><rect x="420" y="660" width="150" height="40" rx="16"/><rect x="475" y="605" width="40" height="150" rx="16"/></g>
+</svg>
