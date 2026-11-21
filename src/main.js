@@ -9,10 +9,24 @@ const { spawn } = require('child_process');
 
 const isMac = process.platform === 'darwin';
 const isWin = process.platform === 'win32';
-const APP_NAME = 'Nodepad++';
+const APP_NAME = 'Codeleaf';
 app.setName(APP_NAME);
-const SMOKE = process.env.NODEPAD_SMOKE; // automated smoke test: NODEPAD_SMOKE=<output dir>
+const SMOKE = process.env.CODELEAF_SMOKE; // automated smoke test: CODELEAF_SMOKE=<output dir>
 if (SMOKE) app.setPath('userData', path.join(SMOKE, 'userdata'));
+
+// One-time move of settings, open files and recent files from the app's previous name.
+if (!SMOKE) {
+  try {
+    const newDir = app.getPath('userData');
+    const oldDir = path.join(app.getPath('appData'), 'Nodepad++');
+    if (fs.existsSync(oldDir) && !fs.existsSync(path.join(newDir, 'settings.json'))) {
+      fs.mkdirSync(newDir, { recursive: true });
+      for (const f of ['settings.json', 'session.json', 'recent.json']) {
+        try { fs.copyFileSync(path.join(oldDir, f), path.join(newDir, f)); } catch { /* missing file */ }
+      }
+    }
+  } catch { /* ignore */ }
+}
 
 // ---------------------------------------------------------------------------
 // Persistence
@@ -423,7 +437,7 @@ function runSmoke(win) {
   wc.on('console-message', (e, level, msg, line, src) => console.log(`[renderer:${level}] ${msg} (${src}:${line})`));
   wc.on('did-finish-load', () => setTimeout(async () => {
     try {
-      const script = process.env.NODEPAD_SMOKE_JS || '';
+      const script = process.env.CODELEAF_SMOKE_JS || '';
       if (script) await wc.executeJavaScript(fs.readFileSync(script, 'utf8'));
       await new Promise(r => setTimeout(r, 1500));
       const info = await wc.executeJavaScript(`JSON.stringify({ title: document.title, tabs: document.querySelectorAll('.tab').length, loading: !!document.getElementById('loading'), status: document.getElementById('statusbar').innerText.replace(/\\s+/g,' '), monaco: !!window.monaco })`);
@@ -999,7 +1013,7 @@ ipcMain.on('run-command', (e, command, cwd) => {
 
 ipcMain.handle('print', async (e, { title, text, fontFamily }) => {
   const esc = s => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-  const tmp = path.join(os.tmpdir(), `nodepad-print-${Date.now()}.html`);
+  const tmp = path.join(os.tmpdir(), `codeleaf-print-${Date.now()}.html`);
   await fsp.writeFile(tmp, `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title>` +
     `<style>body{margin:0}pre{font:9.5pt ${fontFamily};white-space:pre-wrap;word-wrap:break-word;margin:0}</style>` +
     `</head><body><pre>${esc(text)}</pre></body></html>`);

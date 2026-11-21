@@ -501,7 +501,7 @@
         div.querySelector('.close').addEventListener('click', (e) => { e.stopPropagation(); closeTab(t); });
         div.addEventListener('dblclick', (e) => { if (!e.target.closest('.close')) closeTab(t); });
         div.addEventListener('contextmenu', (e) => { e.preventDefault(); tabContextMenu(t, e); });
-        div.addEventListener('dragstart', (e) => { dragTabId = t.id; e.dataTransfer.setData('text/x-nodepad-tab', String(t.id)); e.dataTransfer.effectAllowed = 'move'; });
+        div.addEventListener('dragstart', (e) => { dragTabId = t.id; e.dataTransfer.setData('text/x-codeleaf-tab', String(t.id)); e.dataTransfer.effectAllowed = 'move'; });
         div.addEventListener('dragend', () => { dragTabId = null; });
         div.addEventListener('dragover', (e) => { if (dragTabId != null) { e.preventDefault(); div.classList.add('drag-over'); } });
         div.addEventListener('dragleave', () => div.classList.remove('drag-over'));
@@ -718,7 +718,7 @@
     if (!t) return;
     const dirty = isDirty(t);
     api.send('window-state', {
-      title: `${dirty ? '*' : ''}${t.path || t.title} - Nodepad++`,
+      title: `${dirty ? '*' : ''}${t.path || t.title} - Codeleaf`,
       edited: dirty,
       filePath: t.path,
     });
@@ -983,7 +983,7 @@
         const r = await message({
           type: 'question', message: `"${p}"`,
           detail: isDirty(t)
-            ? 'This file has been modified by another program.\nReload it and lose the changes made in Nodepad++?'
+            ? 'This file has been modified by another program.\nReload it and lose the changes made in Codeleaf?'
             : 'This file has been modified by another program.\nDo you want to reload it?',
           buttons: ['Reload', 'Keep Current'], defaultId: 0, cancelId: 1,
         });
@@ -1032,7 +1032,7 @@
     if (!out) return;
     const range = new monaco.Range(start, 1, end, m.getLineMaxColumn(end));
     editor.pushUndoStop();
-    editor.executeEdits('nodepad', [{ range, text: out.join(m.getEOL()), forceMoveMarkers: true }]);
+    editor.executeEdits('codeleaf', [{ range, text: out.join(m.getEOL()), forceMoveMarkers: true }]);
     editor.pushUndoStop();
   }
 
@@ -1049,7 +1049,7 @@
       return;
     }
     editor.pushUndoStop();
-    editor.executeEdits('nodepad', edits);
+    editor.executeEdits('codeleaf', edits);
     editor.pushUndoStop();
   }
 
@@ -1133,7 +1133,7 @@
   function insertText(text) {
     const sels = editor.getSelections();
     editor.pushUndoStop();
-    editor.executeEdits('nodepad', sels.map((s) => ({ range: s, text, forceMoveMarkers: true })));
+    editor.executeEdits('codeleaf', sels.map((s) => ({ range: s, text, forceMoveMarkers: true })));
     editor.pushUndoStop();
   }
 
@@ -1312,7 +1312,7 @@
     editor.focus();
     const a = editor.getAction(id);
     if (a) a.run();
-    else editor.trigger('nodepad', id, null);
+    else editor.trigger('codeleaf', id, null);
   }
   function toggleSetting(key) {
     if (key === 'columnMode') {

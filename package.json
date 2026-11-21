@@ -1,10 +1,10 @@
 {
-  "name": "nodepad-plus-plus",
-  "productName": "Nodepad++",
+  "name": "codeleaf",
+  "productName": "Codeleaf",
   "version": "1.0.0",
   "description": "A fast, tabbed source code editor for macOS (Apple Silicon) and Windows",
   "main": "src/main.js",
-  "author": "Nodepad++",
+  "author": "Codeleaf",
   "license": "MIT",
   "private": true,
   "dependencies": {
@@ -25,9 +25,9 @@
     "postinstall": "node scripts/dev-branding.js"
   },
   "build": {
-    "appId": "com.nodepadplusplus.editor",
-    "productName": "Nodepad++",
-    "copyright": "Nodepad++",
+    "appId": "com.codeleaf.editor",
+    "productName": "Codeleaf",
+    "copyright": "Codeleaf",
     "directories": {
       "output": "dist",
       "buildResources": "build"
@@ -126,7 +126,7 @@
       ]
     },
     "dmg": {
-      "title": "Nodepad++"
+      "title": "Codeleaf"
     },
     "win": {
       "icon": "build/icon.png",
@@ -146,7 +146,7 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "shortcutName": "Nodepad++"
+      "shortcutName": "Codeleaf"
     }
   }
 }

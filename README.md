@@ -1,4 +1,4 @@
-# Nodepad++
+# Codeleaf
 
 A fast, tabbed text and source code editor in the spirit of Notepad++. It runs natively on
 **macOS (Apple Silicon M1–M4)** and **Windows (x64 and ARM64)**, with the same features on both.
@@ -19,12 +19,12 @@ npm start
 
 | Command | Output (in `dist/`) |
 | --- | --- |
-| `npm run dist:mac` | `Nodepad++-1.0.0-arm64.dmg` and `.zip` (Apple Silicon) |
+| `npm run dist:mac` | `Codeleaf-1.0.0-arm64.dmg` and `.zip` (Apple Silicon) |
 | `npm run dist:mac-intel` | Intel Mac build |
-| `npm run dist:win` | `Nodepad++ Setup 1.0.0.exe` (one installer for x64 and ARM64) |
+| `npm run dist:win` | `Codeleaf Setup 1.0.0.exe` (one installer for x64 and ARM64) |
 
 The Mac app is ad-hoc signed. If you copy it to another Mac, right-click it and choose **Open** the
-first time, or run `xattr -cr /Applications/Nodepad++.app`. The Windows installer is unsigned, so
+first time, or run `xattr -cr /Applications/Codeleaf.app`. The Windows installer is unsigned, so
 SmartScreen shows **More info → Run anyway** the first time.
 
 ## Features

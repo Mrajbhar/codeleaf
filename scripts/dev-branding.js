@@ -1,4 +1,4 @@
-// Makes `npm start` on macOS show "Nodepad++" and its icon instead of "Electron".
+// Makes `npm start` on macOS show "Codeleaf" and its icon instead of "Electron".
 // It rebrands the local development copy of Electron.app in node_modules (it never touches
 // packaged builds, which electron-builder brands on its own).
 'use strict';
@@ -9,13 +9,13 @@ const path = require('path');
 
 if (process.platform !== 'darwin') process.exit(0);
 
-const NAME = 'Nodepad++';
+const NAME = 'Codeleaf';
 const root = path.join(__dirname, '..');
 const appDir = path.join(root, 'node_modules', 'electron', 'dist', 'Electron.app');
 const plist = path.join(appDir, 'Contents', 'Info.plist');
 const iconPng = path.join(root, 'build', 'icon.png');
 const targetIcns = path.join(appDir, 'Contents', 'Resources', 'electron.icns');
-const stamp = path.join(root, 'node_modules', 'electron', '.nodepad-branded');
+const stamp = path.join(root, 'node_modules', 'electron', '.codeleaf-branded');
 
 if (!fs.existsSync(plist)) process.exit(0);
 
@@ -33,7 +33,7 @@ setKey('CFBundleName', NAME);
 setKey('CFBundleDisplayName', NAME);
 
 // 2. Icon: build an .icns from build/icon.png
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nodepad-icon-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codeleaf-icon-'));
 const set = path.join(tmp, 'icon.iconset');
 fs.mkdirSync(set);
 for (const size of [16, 32, 128, 256, 512]) {
