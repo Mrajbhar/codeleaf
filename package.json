@@ -23,7 +23,8 @@
     "dist": "electron-builder --mac --arm64 --x64 && electron-builder --win --x64 --arm64",
     "prestart": "node scripts/dev-branding.js",
     "postinstall": "node scripts/dev-branding.js",
-    "dist:linux": "electron-builder --linux"
+    "dist:linux": "electron-builder --linux",
+    "release": "node scripts/release.js"
   },
   "build": {
     "appId": "com.codeleaf.editor",
