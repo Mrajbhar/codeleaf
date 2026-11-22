@@ -1,7 +1,7 @@
 {
   "name": "codeleaf",
   "productName": "Codeleaf",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "A fast, tabbed source code editor for macOS (Apple Silicon) and Windows",
   "main": "src/main.js",
   "author": "Codeleaf",
