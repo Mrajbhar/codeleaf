@@ -67,6 +67,12 @@ const DEFAULT_SETTINGS = {
   resultsHeight: 200,
   lastMacro: null,
   checkForUpdates: true,
+  showPreview: false,
+  previewSync: true,
+  sidebarPanel: 'files',
+  outlineSort: 'position',
+  bracketColors: true,
+  stickyScroll: false,
   lastUpdateCheck: 0,
   skippedVersion: '',
   windowBounds: null,
@@ -543,6 +549,7 @@ function buildMenu() {
       { label: 'New', accelerator: 'CmdOrCtrl+N', click: cmd('new') },
       { label: 'Open…', accelerator: 'CmdOrCtrl+O', click: cmd('open') },
       { label: 'Open Folder as Workspace…', click: cmd('openFolder') },
+      { label: 'Go to File…', accelerator: 'CmdOrCtrl+Alt+P', click: cmd('quickOpen') },
       { label: 'Open Recent', submenu: recentItems },
       { label: 'Restore Recently Closed File', accelerator: 'CmdOrCtrl+Shift+T', click: cmd('reopenClosed') },
       { label: 'Reload from Disk', click: cmd('reload'), enabled: !!s.hasPath },
@@ -673,6 +680,12 @@ function buildMenu() {
           { type: 'separator' },
           { label: 'JSON Pretty Print', click: cmd('transform', 'jsonPretty') },
           { label: 'JSON Minify', click: cmd('transform', 'jsonMin') },
+          { type: 'separator' },
+          { label: 'Unix Timestamp ↔ Date', click: cmd('transform', 'timestamp') },
+          {
+            label: 'Generate Hash',
+            submenu: ['MD5', 'SHA-1', 'SHA-256', 'SHA-512'].map((h) => ({ label: h, click: cmd('hash', h.toLowerCase().replace('-', '')) })),
+          },
         ],
       },
       {
@@ -689,6 +702,8 @@ function buildMenu() {
           { label: 'Date Time (short)', click: cmd('insertDate', 'short') },
           { label: 'Date Time (long)', click: cmd('insertDate', 'long') },
           { label: 'Date Time (ISO 8601)', click: cmd('insertDate', 'iso') },
+          { label: 'Unix Timestamp (now)', click: cmd('insertDate', 'unix') },
+          { label: 'UUID', accelerator: 'CmdOrCtrl+Alt+U', click: cmd('insertUuid') },
         ],
       },
       { type: 'separator' },
@@ -734,6 +749,18 @@ function buildMenu() {
         ],
       },
       { label: 'Bookmark All Lines Containing…', click: cmd('markLines') },
+      { type: 'separator' },
+      {
+        label: 'Mark with Colour',
+        submenu: [
+          { label: 'Mark with Next Colour', accelerator: 'CmdOrCtrl+Shift+M', click: cmd('markStyle', 0) },
+          { type: 'separator' },
+          ...['1st (cyan)', '2nd (orange)', '3rd (yellow)', '4th (purple)', '5th (green)'].map((n, i) => ({ label: `Using ${n} Style`, click: cmd('markStyle', i + 1) })),
+          { type: 'separator' },
+          ...['1st (cyan)', '2nd (orange)', '3rd (yellow)', '4th (purple)', '5th (green)'].map((n, i) => ({ label: `Clear ${n} Style`, click: cmd('clearMarkStyle', i + 1) })),
+          { label: 'Clear All Styles', click: cmd('clearMarkStyle', 0) },
+        ],
+      },
     ],
   });
 
@@ -750,6 +777,8 @@ function buildMenu() {
           check('Show Indent Guide', s.showIndentGuides, cmd('toggle', 'showIndentGuides')),
           check('Show Line Numbers', s.showLineNumbers, cmd('toggle', 'showLineNumbers')),
           check('Highlight Current Line', s.highlightCurrentLine, cmd('toggle', 'highlightCurrentLine')),
+          check('Coloured Bracket Pairs', s.bracketColors, cmd('toggle', 'bracketColors')),
+          check('Sticky Scroll (pin current function)', s.stickyScroll, cmd('toggle', 'stickyScroll')),
         ],
       },
       {
@@ -765,11 +794,14 @@ function buildMenu() {
       { label: 'Move to Other View', click: cmd('moveToOtherView'), enabled: (s.tabCount || 0) > 1 },
       { label: 'Focus on Another View', accelerator: 'F8', click: cmd('focusOtherView'), enabled: !!s.split || !!s.comparing },
       { type: 'separator' },
-      check('Folder as Workspace', s.showSidebar, cmd('toggle', 'showSidebar')),
+      check('Folder as Workspace', s.showSidebar && s.sidebarPanel !== 'outline', cmd('togglePanel', 'files')),
+      check('Function List', s.showSidebar && s.sidebarPanel === 'outline', cmd('togglePanel', 'outline'), { accelerator: 'CmdOrCtrl+Alt+L' }),
+      check('Markdown / HTML Preview', s.showPreview, cmd('toggle', 'showPreview'), { accelerator: 'CmdOrCtrl+Shift+V' }),
       check('Document Map (Minimap)', s.minimap, cmd('toggle', 'minimap')),
       check('Search Results Panel', s.showResults, cmd('toggle', 'showResults'), { accelerator: 'F7' }),
       check('Toolbar', s.showToolbar, cmd('toggle', 'showToolbar')),
       check('Status Bar', s.showStatusBar, cmd('toggle', 'showStatusBar')),
+      check('Distraction-Free Mode', s.zen, cmd('toggleZen'), { accelerator: 'CmdOrCtrl+Alt+Z' }),
       { type: 'separator' },
       {
         label: 'Fold',
@@ -1095,6 +1127,21 @@ ipcMain.handle('readdir', async (e, dir) => {
 });
 
 ipcMain.handle('find-in-files', (e, opts) => findInFiles(opts));
+ipcMain.handle('list-files', async (e, root) => {
+  const out = [];
+  try {
+    for await (const f of walk(root, () => true, { cancelled: false })) {
+      out.push(f);
+      if (out.length >= 30000) break;
+    }
+  } catch { /* unreadable folder */ }
+  return out;
+});
+ipcMain.handle('hash', (e, algo, text) => {
+  const map = { md5: 'md5', sha1: 'sha1', sha256: 'sha256', sha512: 'sha512' };
+  if (!map[algo]) return '';
+  return require('crypto').createHash(map[algo]).update(text, 'utf8').digest('hex');
+});
 ipcMain.on('cancel-find', () => { if (currentSearch) currentSearch.cancelled = true; });
 ipcMain.handle('replace-in-files', (e, opts) => replaceInFiles(opts));
 

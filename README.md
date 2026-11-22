@@ -66,6 +66,13 @@ first time.
   View*, or drag it to the other tab bar; F8 switches between views
 - **Compare** (Plugins → Compare): side-by-side or inline diff of two files, or of a file against
   its saved version, with next/previous difference (F8 / Shift+F8)
+- **Function List**: functions, classes and headings for 25+ languages, with a filter; click to jump
+- **Markdown / HTML preview**: live, side by side, scrolls with the editor (⇧⌘V / Ctrl+Shift+V)
+- **Go to File**: type part of a name to open any file in the workspace (⌥⌘P / Ctrl+Alt+P)
+- **Mark with colours**: 5 highlight styles that follow your edits and survive restarts
+- **Word count** in the status bar for the document or the selection
+- **Developer tools**: coloured bracket pairs, sticky scroll, distraction-free mode, insert UUID or
+  Unix timestamp, timestamp ↔ date conversion, MD5 / SHA-1 / SHA-256 / SHA-512 hashes
 - **Folder as Workspace** sidebar, Document Map (minimap), column / multi-cursor editing
 - **Detects changes from other programs**, plus read-only mode, zoom and print
 - **Run** menu with `$(FULL_CURRENT_PATH)`-style variables; launch in browser; open in Terminal or Finder/Explorer

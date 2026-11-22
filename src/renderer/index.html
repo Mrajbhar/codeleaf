@@ -10,7 +10,11 @@
   <div id="toolbar" role="toolbar"></div>
   <div id="main">
     <aside id="sidebar" hidden>
-      <div class="side-header">
+      <div class="side-tabs" role="tablist">
+        <button class="side-tab" data-panel="files" role="tab">Workspace</button>
+        <button class="side-tab" data-panel="outline" role="tab">Function List</button>
+      </div>
+      <div class="side-header" data-for="files">
         <span id="side-title">Folder as Workspace</span>
         <span class="side-actions">
           <button data-side="open" title="Open folder">📂</button>
@@ -19,7 +23,15 @@
           <button data-side="close" title="Close panel">✕</button>
         </span>
       </div>
-      <div id="tree" tabindex="0"></div>
+      <div id="tree" tabindex="0" data-for="files"></div>
+      <div class="side-header" data-for="outline">
+        <input id="outline-filter" type="search" placeholder="Filter functions…" spellcheck="false">
+        <span class="side-actions">
+          <button data-outline="sort" title="Sort A–Z / by position">⇅</button>
+          <button data-side="close" title="Close panel">✕</button>
+        </span>
+      </div>
+      <div id="outline" tabindex="0" data-for="outline"></div>
     </aside>
     <div id="sidebar-resizer" class="resizer-v" hidden></div>
     <section id="center">
@@ -38,6 +50,18 @@
             <button class="tab-new" title="New tab">+</button>
           </div>
           <div class="editor-host"></div>
+        </section>
+        <div id="preview-resizer" class="resizer-v" hidden></div>
+        <section id="preview" hidden>
+          <div class="preview-header">
+            <span id="preview-title">Preview</span>
+            <span class="side-actions">
+              <button data-preview="sync" title="Scroll with the editor">⇅</button>
+              <button data-preview="close" title="Close preview">✕</button>
+            </span>
+          </div>
+          <iframe id="preview-frame" sandbox="allow-same-origin" title="Preview"></iframe>
+          <div id="preview-empty" hidden></div>
         </section>
       </div>
       <section id="compare" hidden>
@@ -73,6 +97,7 @@
     <span id="sb-lang" class="sb-item clickable" title="Change language"></span>
     <span id="sb-size" class="sb-item"></span>
     <span id="sb-pos" class="sb-item"></span>
+    <span id="sb-words" class="sb-item" title="Word count"></span>
     <span class="sb-spacer"></span>
     <span id="sb-macro" class="sb-item" hidden>● REC</span>
     <span id="sb-indent" class="sb-item clickable" title="Indentation"></span>
@@ -83,6 +108,8 @@
   <div id="modal-root"></div>
   <div id="loading">Loading…</div>
 
+  <!-- marked must load before Monaco's AMD loader so it registers as a global -->
+  <script src="../../node_modules/marked/lib/marked.umd.js"></script>
   <script src="../../node_modules/monaco-editor/min/vs/loader.js"></script>
   <script src="icons.js"></script>
   <script src="app.js"></script>

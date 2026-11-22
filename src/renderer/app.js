@@ -18,6 +18,8 @@
   await new Promise((resolve, reject) => require(['vs/editor/editor.main'], resolve, reject));
 
   const $ = (sel) => document.querySelector(sel);
+  // Monaco cancels in-flight work (e.g. word highlighting) when you switch files quickly; that is expected.
+  window.addEventListener('unhandledrejection', (e) => { if (e.reason && e.reason.name === 'Canceled') e.preventDefault(); });
   const el = {
     toolbar: $('#toolbar'),
     sidebar: $('#sidebar'), sideResizer: $('#sidebar-resizer'), tree: $('#tree'), sideTitle: $('#side-title'),
@@ -138,6 +140,7 @@
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
     monaco.editor.setTheme(dark ? 'npp-dark' : 'npp-light');
     updateThemeButton();
+    if (featuresReady && settings.showPreview) renderPreview(true);
   }
   function isDarkNow() { return document.documentElement.dataset.theme === 'dark'; }
   function updateThemeButton() {
@@ -208,7 +211,9 @@
       minimap: { enabled: settings.minimap, renderCharacters: false, showSlider: 'always' },
       renderWhitespace: settings.renderWhitespace ? 'all' : 'none',
       renderControlCharacters: settings.renderWhitespace,
-      guides: { indentation: settings.showIndentGuides },
+      guides: { indentation: settings.showIndentGuides, bracketPairs: settings.bracketColors !== false ? 'active' : false },
+      bracketPairColorization: { enabled: settings.bracketColors !== false },
+      stickyScroll: { enabled: !!settings.stickyScroll },
       lineNumbers: settings.showLineNumbers ? 'on' : 'off',
       renderLineHighlight: settings.highlightCurrentLine ? 'all' : 'none',
       autoClosingBrackets: settings.autoCloseBrackets ? 'languageDefined' : 'never',
@@ -425,6 +430,7 @@
 
   function onTabContentChanged(t) {
     refreshDirty(t);
+    if (t.marks && t.marks.length) { clearTimeout(t._markTimer); t._markTimer = setTimeout(() => applyMarks(t), 300); }
     if (t === activeTab) scheduleStatus();
     scheduleSession();
   }
@@ -710,6 +716,7 @@
     const o = m.getOptions();
     el.sbIndent.textContent = o.insertSpaces ? `Spaces: ${o.tabSize}` : `Tab Size: ${o.tabSize}`;
     el.sbMode.textContent = t.readOnly ? 'Read-Only' : (state.columnMode ? 'COL' : 'INS');
+    scheduleSideRefresh();
     pushEditorState();
   }
 
@@ -741,6 +748,8 @@
       showSidebar: settings.showSidebar, showResults: settings.showResults, showToolbar: settings.showToolbar, showStatusBar: settings.showStatusBar,
       tabs: tabs.map((x) => ({ id: x.id, title: (isDirty(x) ? '*' : '') + x.title, active: x === activeTab })),
       tabCount: tabs.length, split: isSplit(), comparing: !!cmp, compareSideBySide: settings.compareSideBySide !== false,
+      showPreview: settings.showPreview, sidebarPanel: settings.sidebarPanel, zen: !!state.zen,
+      bracketColors: settings.bracketColors !== false, stickyScroll: !!settings.stickyScroll,
     };
     const json = JSON.stringify(s);
     if (json === lastStateJson) return;
@@ -1127,6 +1136,16 @@
     jsonMin: (s) => JSON.stringify(JSON.parse(s)),
     sentence: (s) => s.toLowerCase().replace(/(^\s*|[.!?]\s+)(\p{Ll})/gu, (m, p, c) => p + c.toUpperCase()),
     invert: (s) => [...s].map((c) => (c === c.toUpperCase() ? c.toLowerCase() : c.toUpperCase())).join(''),
+    timestamp: (s) => {
+      const v = s.trim();
+      if (/^-?\d{1,13}(\.\d+)?$/.test(v)) {
+        const n = Number(v);
+        return new Date(Math.abs(n) >= 1e12 ? n : n * 1000).toISOString();
+      }
+      const ms = Date.parse(v);
+      if (Number.isNaN(ms)) throw new Error('Select a Unix timestamp (like 1764000000) or a date (like 2026-11-22T10:30:00Z).');
+      return String(Math.floor(ms / 1000));
+    },
     splitCommas: (s) => s.split(/,\s*/).join(',' + model().getEOL()),
   };
 
@@ -1397,9 +1416,20 @@
       case 'sentenceCase': transformSelections(TRANSFORMS.sentence); break;
       case 'invertCase': transformSelections(TRANSFORMS.invert); break;
       case 'splitLines': transformSelections(TRANSFORMS.splitCommas); break;
+      case 'insertUuid': insertText(crypto.randomUUID()); break;
+      case 'hash': await showHash(arg); break;
+      case 'markStyle': markStyle(arg); break;
+      case 'clearMarkStyle': clearMarkStyle(arg); break;
+      case 'quickOpen': await quickOpen(); break;
+      case 'toggleZen': toggleZen(); break;
+      case 'togglePanel': {
+        const open = settings.showSidebar && (settings.sidebarPanel === 'outline' ? 'outline' : 'files') === arg;
+        setSidebarPanel(arg, !open);
+        break;
+      }
       case 'insertDate': {
         const d = new Date();
-        const text = arg === 'iso' ? d.toISOString()
+        const text = arg === 'unix' ? String(Math.floor(d.getTime() / 1000)) : arg === 'iso' ? d.toISOString()
           : arg === 'long' ? d.toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'medium' })
             : d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
         insertText(text);
@@ -1578,7 +1608,8 @@
     ['zoomIn', 'Zoom In', 'zoomIn'], ['zoomOut', 'Zoom Out', 'zoomOut'], '|',
     ['wrap', 'Word Wrap', 'toggle:wordWrap'], ['whitespace', 'Show All Characters', 'toggle:renderWhitespace'],
     ['indentGuide', 'Show Indent Guide', 'toggle:showIndentGuides'], ['lineNumbers', 'Line Numbers', 'toggle:showLineNumbers'], '|',
-    ['sidebar', 'Folder as Workspace', 'toggle:showSidebar'], ['minimap', 'Document Map', 'toggle:minimap'], '|',
+    ['sidebar', 'Folder as Workspace', 'togglePanel:files'], ['outline', 'Function List', 'togglePanel:outline'],
+    ['preview', 'Markdown / HTML Preview', 'toggle:showPreview'], ['minimap', 'Document Map', 'toggle:minimap'], '|',
     ['record', 'Start Recording Macro', 'macro:record'], ['stop', 'Stop Recording', 'macro:stop'],
     ['play', 'Playback Macro', 'macro:play'], ['playMulti', 'Run Macro Multiple Times', 'macro:multi'],
     ['moon', 'Switch to Dark Mode', 'toggleTheme'],
@@ -1602,9 +1633,13 @@
   }
   updateThemeButton();
   function updateToolbarState() {
-    for (const key of ['wordWrap', 'renderWhitespace', 'showIndentGuides', 'showLineNumbers', 'showSidebar', 'minimap']) {
+    for (const key of ['wordWrap', 'renderWhitespace', 'showIndentGuides', 'showLineNumbers', 'minimap', 'showPreview']) {
       const b = toolbarButtons['toggle:' + key];
       if (b) b.classList.toggle('on', !!settings[key]);
+    }
+    for (const panel of ['files', 'outline']) {
+      const b = toolbarButtons['togglePanel:' + panel];
+      if (b) b.classList.toggle('on', settings.showSidebar && (settings.sidebarPanel === 'outline' ? 'outline' : 'files') === panel);
     }
     const rec = state.macroRecording;
     const has = !!(settings.lastMacro && settings.lastMacro.length);
@@ -1625,7 +1660,15 @@
     el.sidebar.style.width = settings.sidebarWidth + 'px';
     el.results.hidden = el.resultsResizer.hidden = !settings.showResults;
     el.results.style.height = settings.resultsHeight + 'px';
-    if (settings.showSidebar) renderTree();
+    const panel = settings.sidebarPanel === 'outline' ? 'outline' : 'files';
+    el.sidebar.dataset.panel = panel;
+    el.sidebar.querySelectorAll('.side-tab').forEach((b) => b.classList.toggle('active', b.dataset.panel === panel));
+    if (settings.showSidebar && panel === 'files') renderTree();
+    if (settings.showSidebar && panel === 'outline') { lastOutlineKey = ''; renderOutline(); }
+    $('#preview').hidden = $('#preview-resizer').hidden = !settings.showPreview;
+    $('#preview').style.flexBasis = Math.round((settings.previewWidth || 0.45) * 1000) / 10 + '%';
+    $('[data-preview="sync"]').classList.toggle('on', settings.previewSync !== false);
+    if (settings.showPreview) renderPreview(true);
     updateToolbarState();
     pushEditorState();
   }
@@ -1662,6 +1705,7 @@
   function setWorkspace(dir) {
     settings.workspace = dir;
     settings.showSidebar = true;
+    settings.sidebarPanel = 'files';
     expanded.clear();
     dirCache.clear();
     expanded.add(dir);
@@ -1749,8 +1793,65 @@
     }
   }
 
-  el.sidebar.querySelector('.side-actions').addEventListener('click', (e) => {
-    const b = e.target.closest('button'); if (!b) return;
+  // -------------------------------------------------------------------------
+  // v1.1 features: Function List, Preview, word count, colour marks, Go to File, extras
+  // -------------------------------------------------------------------------
+  // `var` on purpose: these are read by hoisted functions that may run before this block.
+  var sideTimer = 0;
+  var lastOutlineKey = '';
+  var outlineItems = [];
+  var lastPreviewKey = '';
+  var wordTimer = 0;
+  var nextMarkStyle = 0;
+
+  function scheduleSideRefresh() {
+    clearTimeout(sideTimer);
+    sideTimer = setTimeout(refreshSidePanels, 250);
+  }
+  function refreshSidePanels() {
+    if (settings.showSidebar && settings.sidebarPanel === 'outline') renderOutline();
+    if (settings.showPreview) renderPreview();
+    updateWordCount();
+  }
+
+  // ---- Word count ----
+  const WORD_RE = /[\p{L}\p{N}_][\p{L}\p{N}_'’-]*/gu;
+  const countWords = (s) => { let n = 0; WORD_RE.lastIndex = 0; while (WORD_RE.exec(s)) n++; return n; };
+  function updateWordCount() {
+    const t = activeTab;
+    const node = $('#sb-words');
+    if (!t || t.closed || !node) return;
+    const m = t.model;
+    let total = '—';
+    if (m.getValueLength() <= 5 * 1024 * 1024) {
+      const ver = m.getAlternativeVersionId();
+      if (!t._wc || t._wc.ver !== ver) t._wc = { ver, n: countWords(m.getValue()) };
+      total = fmt(t._wc.n);
+    }
+    let sel = 0;
+    for (const s of editor.getSelections() || []) if (!s.isEmpty()) sel += countWords(m.getValueInRange(s));
+    node.textContent = sel ? `words : ${fmt(sel)} of ${total}` : `words : ${total}`;
+  }
+
+  // ---- Sidebar panels ----
+  function setSidebarPanel(panel, show = true) {
+    settings.sidebarPanel = panel;
+    settings.showSidebar = show;
+    applyLayout();
+    saveSettings();
+    if (show && panel === 'outline') setTimeout(() => $('#outline-filter').focus(), 0);
+  }
+  el.sidebar.addEventListener('click', (e) => {
+    const tabBtn = e.target.closest('.side-tab');
+    if (tabBtn) { setSidebarPanel(tabBtn.dataset.panel); return; }
+    const sortBtn = e.target.closest('[data-outline="sort"]');
+    if (sortBtn) {
+      settings.outlineSort = settings.outlineSort === 'alpha' ? 'position' : 'alpha';
+      saveSettings(); lastOutlineKey = ''; renderOutline();
+      return;
+    }
+    const b = e.target.closest('[data-side]');
+    if (!b) return;
     switch (b.dataset.side) {
       case 'open': runCommand('openFolder'); break;
       case 'refresh': dirCache.clear(); renderTree(); break;
@@ -1758,6 +1859,385 @@
       case 'close': settings.showSidebar = false; applyLayout(); saveSettings(); break;
     }
   });
+
+  // ---- Function List ----
+  const KW = new Set(['if', 'for', 'while', 'switch', 'catch', 'return', 'else', 'do', 'try', 'with', 'function', 'new', 'typeof',
+    'sizeof', 'delete', 'await', 'yield', 'case', 'throw', 'elif', 'foreach', 'using', 'lock', 'fixed', 'synchronized', 'when',
+    'constructor', 'super', 'this', 'import', 'require', 'defined', 'match']);
+  const JS_RULES = [
+    [/^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*(?<n>[A-Za-z_$][\w$]*)\s*[<(]/, 'function'],
+    [/^\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+(?<n>[A-Za-z_$][\w$]*)/, 'class'],
+    [/^\s*(?:export\s+)?(?:declare\s+)?(?:interface|type|enum)\s+(?<n>[A-Za-z_$][\w$]*)/, 'type'],
+    [/^\s*(?:export\s+)?(?:const|let|var)\s+(?<n>[A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*(?:async\s*)?(?:function\b|\([^)]*\)\s*(?::[^=]+)?=>|[A-Za-z_$][\w$]*\s*=>)/, 'function'],
+    [/^\s+(?:(?:static|async|get|set|public|private|protected|readonly|override|abstract)\s+)*\*?(?<n>[A-Za-z_$#][\w$]*)\s*\([^)]*\)\s*(?::\s*[^{]+)?\{\s*$/, 'method'],
+  ];
+  const CLIKE_RULES = [
+    [/^\s*(?:(?:public|private|protected|internal|static|abstract|final|sealed|partial|export|data|open|inline)\s+)*(?:class|struct|interface|enum|record|trait|object|namespace|union)\s+(?<n>[A-Za-z_][\w]*)/, 'class'],
+    [/^\s*(?:[A-Za-z_][\w:<>,*&\[\]~]*\s+)+[*&]*(?<n>[A-Za-z_~][\w:~]*)\s*\([^;{}]*\)?\s*(?:const\s*)?(?:noexcept\s*)?(?:override\s*)?(?:throws\s+[\w.,\s]+)?\s*\{?\s*$/, 'function'],
+  ];
+  const OUTLINE_RULES = {
+    javascript: JS_RULES, typescript: JS_RULES,
+    python: [[/^\s*class\s+(?<n>\w+)/, 'class'], [/^\s*(?:async\s+)?def\s+(?<n>\w+)/, 'function']],
+    go: [[/^func\s+(?:\([^)]*\)\s*)?(?<n>\w+)/, 'function'], [/^type\s+(?<n>\w+)\s+(?:struct|interface)/, 'class']],
+    rust: [[/^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:unsafe\s+)?(?:const\s+)?(?:extern\s+"\w+"\s+)?fn\s+(?<n>\w+)/, 'function'],
+      [/^\s*(?:pub(?:\([^)]*\))?\s+)?(?:struct|enum|trait|union|mod)\s+(?<n>\w+)/, 'class'],
+      [/^\s*impl(?:<[^>]*>)?\s+(?<n>[\w:<>, ]+?)\s*(?:\{|where|$)/, 'class']],
+    swift: [[/^\s*(?:@\w+\s+)*(?:(?:public|private|internal|fileprivate|open|static|final|override|mutating|class)\s+)*func\s+(?<n>\w+)/, 'function'],
+      [/^\s*(?:(?:public|private|internal|fileprivate|open|final)\s+)*(?:class|struct|enum|protocol|extension|actor)\s+(?<n>\w+)/, 'class']],
+    kotlin: [[/^\s*(?:(?:public|private|internal|protected|override|open|suspend|inline|operator|abstract)\s+)*fun\s+(?:<[^>]*>\s*)?(?:[\w.]+\.)?(?<n>\w+)\s*\(/, 'function'],
+      [/^\s*(?:(?:public|private|internal|data|sealed|open|abstract|enum|inner)\s+)*(?:class|object|interface)\s+(?<n>\w+)/, 'class']],
+    php: [[/function\s+&?(?<n>\w+)\s*\(/, 'function'], [/^\s*(?:(?:abstract|final)\s+)?(?:class|interface|trait|enum)\s+(?<n>\w+)/, 'class']],
+    ruby: [[/^\s*def\s+(?:self\.)?(?<n>[\w?!=]+)/, 'function'], [/^\s*(?:class|module)\s+(?<n>[\w:]+)/, 'class']],
+    lua: [[/^\s*(?:local\s+)?function\s+(?<n>[\w.:]+)/, 'function'], [/^\s*(?:local\s+)?(?<n>[\w.]+)\s*=\s*function\b/, 'function']],
+    perl: [[/^\s*sub\s+(?<n>\w+)/, 'function'], [/^\s*package\s+(?<n>[\w:]+)/, 'class']],
+    shell: [[/^\s*function\s+(?<n>[\w-]+)/, 'function'], [/^\s*(?<n>[\w-]+)\s*\(\)\s*\{?/, 'function']],
+    powershell: [[/^\s*function\s+(?<n>[\w-]+)/i, 'function'], [/^\s*class\s+(?<n>\w+)/i, 'class']],
+    r: [[/^\s*(?<n>[\w.]+)\s*(?:<-|=)\s*function\s*\(/, 'function']],
+    sql: [[/^\s*create\s+(?:or\s+replace\s+)?(?:temporary\s+)?(?<k>table|view|function|procedure|trigger|index)\s+(?:if\s+not\s+exists\s+)?(?<n>[\w."`\[\]]+)/i, 'type']],
+    markdown: [[/^(?<h>#{1,6})\s+(?<n>.+?)\s*#*\s*$/, 'heading']],
+    css: [[/^\s*(?<n>@media[^{]*|[^{}@\/\s][^{};]*?)\s*\{\s*$/, 'section']],
+    ini: [[/^\s*\[(?<n>[^\]]+)\]/, 'section']],
+    yaml: [[/^(?<n>[\w."'-]+)\s*:/, 'section']],
+    html: [[/<(?<h>h[1-6])\b[^>]*>(?<n>.*?)<\/h[1-6]>/i, 'heading'], [/<(?:section|div|nav|main|header|footer|form|table)\b[^>]*\sid=["'](?<n>[^"']+)["']/i, 'section']],
+    clike: CLIKE_RULES,
+  };
+  const LANG_RULES = {
+    javascript: 'javascript', typescript: 'typescript', python: 'python', go: 'go', rust: 'rust', swift: 'swift',
+    kotlin: 'kotlin', php: 'php', ruby: 'ruby', lua: 'lua', perl: 'perl', shell: 'shell', powershell: 'powershell',
+    r: 'r', sql: 'sql', mysql: 'sql', pgsql: 'sql', markdown: 'markdown', css: 'css', scss: 'css', less: 'css',
+    ini: 'ini', yaml: 'yaml', html: 'html', xml: 'html', razor: 'html', handlebars: 'html',
+  };
+  const HASH_COMMENT = new Set(['python', 'ruby', 'shell', 'perl', 'r', 'yaml', 'powershell']);
+  const KIND_LETTER = { function: 'ƒ', method: 'm', class: 'C', type: 'T', heading: 'H', section: '§', variable: 'v' };
+
+  function parseOutline(model, lang) {
+    const key = LANG_RULES[lang] || (lang === 'plaintext' ? null : 'clike');
+    if (!key) return [];
+    const rules = OUTLINE_RULES[key];
+    const items = [];
+    const max = Math.min(model.getLineCount(), 60000);
+    const tabSize = model.getOptions().tabSize || 4;
+    let inBlock = false;
+    for (let ln = 1; ln <= max; ln++) {
+      const line = model.getLineContent(ln);
+      if (line.length > 400) continue;
+      const tr = line.trim();
+      if (!tr) continue;
+      if (key !== 'markdown' && key !== 'html') {
+        if (inBlock) { if (tr.includes('*/')) inBlock = false; continue; }
+        if (tr.startsWith('/*')) { if (!tr.includes('*/')) inBlock = true; continue; }
+        if (tr.startsWith('//') || tr.startsWith('*') || (HASH_COMMENT.has(key) && tr.startsWith('#'))) continue;
+      }
+      for (const [re, kind] of rules) {
+        const m = re.exec(line);
+        if (!m || !m.groups || !m.groups.n) continue;
+        const name = m.groups.n.replace(/<[^>]+>/g, '').trim();
+        if (!name || KW.has(name)) continue;
+        if (key === 'clike' && /^\s*(?:return|else|new|throw|case|delete|await|goto|using|typedef)\b/.test(line)) continue;
+        const indent = expandTabs(line.match(/^\s*/)[0], tabSize).length;
+        let depth = Math.min(6, Math.floor(indent / tabSize));
+        let k = kind;
+        if (m.groups.h) depth = (m.groups.h.length === 2 ? Number(m.groups.h[1]) : m.groups.h.length) - 1;
+        if (k === 'function' && depth > 0 && key !== 'markdown') k = 'method';
+        if (m.groups.k) k = 'type';
+        items.push({ name: name.length > 120 ? name.slice(0, 120) + '…' : name, kind: k, line: ln, depth });
+        break;
+      }
+      if (items.length >= 5000) break;
+    }
+    return items;
+  }
+
+  function renderOutline() {
+    const box = $('#outline');
+    const t = activeTab;
+    if (!t || t.closed) { box.innerHTML = '<div class="ol-empty">No document.</div>'; return; }
+    const key = `${t.id}:${t.model.getAlternativeVersionId()}:${t.model.getLanguageId()}`;
+    if (key !== lastOutlineKey) { outlineItems = parseOutline(t.model, t.model.getLanguageId()); lastOutlineKey = key; }
+    const q = $('#outline-filter').value.trim().toLowerCase();
+    let list = q ? outlineItems.filter((i) => i.name.toLowerCase().includes(q)) : outlineItems;
+    const alpha = settings.outlineSort === 'alpha';
+    if (alpha) list = [...list].sort((a, b) => a.name.localeCompare(b.name));
+    $('[data-outline="sort"]').classList.toggle('on', alpha);
+    if (!list.length) {
+      box.innerHTML = `<div class="ol-empty">${outlineItems.length ? 'No matches.' : t.model.getLanguageId() === 'plaintext'
+        ? 'Set a language (Language menu) to list its functions.' : 'No functions or headings found.'}</div>`;
+      return;
+    }
+    const cur = (editor.getPosition() || { lineNumber: 1 }).lineNumber;
+    let current = null;
+    for (const i of outlineItems) if (i.line <= cur) current = i;
+    const frag = document.createDocumentFragment();
+    for (const i of list) {
+      const row = document.createElement('div');
+      row.className = 'ol-item' + (i === current ? ' current' : '');
+      row.style.paddingLeft = 8 + (alpha || q ? 0 : i.depth * 14) + 'px';
+      row.title = `${i.name} — line ${i.line}`;
+      row.innerHTML = `<span class="ol-kind k-${i.kind}">${KIND_LETTER[i.kind] || '•'}</span><span class="ol-name"></span><span class="ol-line">${i.line}</span>`;
+      row.querySelector('.ol-name').textContent = i.name;
+      row.addEventListener('click', () => {
+        editor.setPosition({ lineNumber: i.line, column: 1 });
+        editor.revealLineNearTop(i.line);
+        editor.focus();
+      });
+      frag.appendChild(row);
+    }
+    box.replaceChildren(frag);
+    const curEl = box.querySelector('.ol-item.current');
+    if (curEl) curEl.scrollIntoView({ block: 'nearest' });
+  }
+  $('#outline-filter').addEventListener('input', () => renderOutline());
+  $('#outline-filter').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { const first = $('#outline .ol-item'); if (first) first.click(); }
+    if (e.key === 'Escape') { e.target.value = ''; renderOutline(); editor.focus(); }
+  });
+
+  // ---- Markdown / HTML preview ----
+  const previewEl = $('#preview');
+  const previewFrame = $('#preview-frame');
+  const previewEmpty = $('#preview-empty');
+  const PREVIEW_CSS = (dark) => `
+    :root { color-scheme: ${dark ? 'dark' : 'light'}; }
+    body { font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; margin: 0; padding: 20px 28px 60px;
+      color: ${dark ? '#dcdcdc' : '#1f2328'}; background: ${dark ? '#1e1e1e' : '#ffffff'}; max-width: 900px; }
+    h1, h2 { border-bottom: 1px solid ${dark ? '#3c3c3c' : '#d8dee4'}; padding-bottom: .3em; }
+    h1, h2, h3, h4 { margin: 1.4em 0 .6em; line-height: 1.25; }
+    a { color: ${dark ? '#6cb6ff' : '#0969da'}; }
+    code, pre { font: 13px Menlo, Consolas, monospace; background: ${dark ? '#2b2b2b' : '#f3f4f6'}; border-radius: 6px; }
+    code { padding: .15em .4em; }
+    pre { padding: 12px 14px; overflow: auto; } pre code { padding: 0; background: none; }
+    blockquote { margin: 0; padding: 0 1em; color: ${dark ? '#9a9a9a' : '#59636e'}; border-left: .25em solid ${dark ? '#3c3c3c' : '#d1d9e0'}; }
+    table { border-collapse: collapse; } th, td { border: 1px solid ${dark ? '#3c3c3c' : '#d1d9e0'}; padding: 6px 12px; }
+    tr:nth-child(2n) { background: ${dark ? '#252525' : '#f6f8fa'}; }
+    img { max-width: 100%; } hr { border: none; border-top: 1px solid ${dark ? '#3c3c3c' : '#d8dee4'}; }
+    input[type=checkbox] { margin-right: .4em; }`;
+
+  function previewKind(t) {
+    if (!t) return null;
+    const lang = t.model.getLanguageId();
+    if (lang === 'markdown') return 'markdown';
+    if (lang === 'html') return 'html';
+    return null;
+  }
+  function renderPreview(force) {
+    const t = activeTab;
+    const kind = previewKind(t);
+    $('#preview-title').textContent = t ? `Preview — ${t.title}` : 'Preview';
+    if (!kind) {
+      previewFrame.hidden = true;
+      previewEmpty.hidden = false;
+      previewEmpty.textContent = 'Preview works for Markdown (.md) and HTML files. Open one, or set the language from the status bar.';
+      lastPreviewKey = '';
+      return;
+    }
+    const dark = document.documentElement.dataset.theme === 'dark';
+    const key = `${t.id}:${t.model.getAlternativeVersionId()}:${dark}`;
+    if (!force && key === lastPreviewKey) return;
+    lastPreviewKey = key;
+    previewFrame.hidden = false;
+    previewEmpty.hidden = true;
+    const base = t.path ? `<base href="${escapeHtml(fileUrl(dirname(t.path)) + '/')}">` : '';
+    const src = t.model.getValue();
+    let doc;
+    if (kind === 'markdown') {
+      let body;
+      try { body = window.marked.parse(src, { gfm: true }); } catch (e) { body = `<pre>${escapeHtml(String(e))}</pre>`; }
+      doc = `<!doctype html><html><head><meta charset="utf-8">${base}<style>${PREVIEW_CSS(dark)}</style></head><body>${body}</body></html>`;
+    } else {
+      doc = /<head[^>]*>/i.test(src) ? src.replace(/<head([^>]*)>/i, `<head$1>${base}`) : base + src;
+    }
+    const win = previewFrame.contentWindow;
+    const ratio = win && win.document && win.document.documentElement
+      ? win.scrollY / Math.max(1, win.document.documentElement.scrollHeight - win.innerHeight) : 0;
+    previewFrame.onload = () => {
+      const d = previewFrame.contentDocument;
+      if (!d) return;
+      d.addEventListener('click', (e) => {
+        const a = e.target.closest && e.target.closest('a[href]');
+        if (!a) return;
+        const href = a.getAttribute('href');
+        if (href.startsWith('#')) return;
+        e.preventDefault();
+        if (/^https?:/i.test(a.href)) api.send('open-external', a.href);
+      });
+      const w = previewFrame.contentWindow;
+      if (settings.previewSync) syncPreviewScroll();
+      else w.scrollTo(0, ratio * (d.documentElement.scrollHeight - w.innerHeight));
+    };
+    previewFrame.srcdoc = doc;
+  }
+  function syncPreviewScroll() {
+    if (!settings.showPreview || !settings.previewSync || previewFrame.hidden) return;
+    const w = previewFrame.contentWindow;
+    const d = previewFrame.contentDocument;
+    if (!w || !d || !d.documentElement) return;
+    const top = editor.getScrollTop();
+    const max = Math.max(1, editor.getScrollHeight() - editor.getLayoutInfo().height);
+    w.scrollTo(0, (top / max) * (d.documentElement.scrollHeight - w.innerHeight));
+  }
+  for (const v of views) v.editor.onDidScrollChange(() => { if (v.index === currentView) syncPreviewScroll(); });
+  previewEl.querySelector('.side-actions').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.preview === 'close') { settings.showPreview = false; applyLayout(); saveSettings(); }
+    if (b.dataset.preview === 'sync') { settings.previewSync = !settings.previewSync; applyLayout(); saveSettings(); syncPreviewScroll(); }
+  });
+  makeResizer($('#preview-resizer'), (e) => {
+    const r = viewsEl.getBoundingClientRect();
+    settings.previewWidth = Math.max(0.15, Math.min(0.8, (r.right - e.clientX) / r.width));
+    previewEl.style.flexBasis = Math.round(settings.previewWidth * 1000) / 10 + '%';
+  });
+
+  // ---- Mark with colours ----
+  const MARK_COLORS = ['', '#00d2ff', '#ff8c00', '#ffe600', '#aa5aff', '#28c85a'];
+  function applyMarks(t) {
+    if (!t || t.closed) return;
+    const decos = [];
+    for (const mk of t.marks || []) {
+      let found = [];
+      try { found = t.model.findMatches(mk.text, false, false, true, null, false, 5000); } catch { /* ignore */ }
+      for (const f of found) {
+        decos.push({
+          range: f.range,
+          options: {
+            inlineClassName: `mark-style-${mk.style}`,
+            stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+            overviewRuler: { color: MARK_COLORS[mk.style], position: monaco.editor.OverviewRulerLane.Center },
+          },
+        });
+      }
+    }
+    t.markIds = t.model.deltaDecorations(t.markIds || [], decos);
+  }
+  function markStyle(style) {
+    const t = activeTab;
+    if (!t) return;
+    const text = selectedOrWord();
+    if (!text) return;
+    if (!style) { style = (nextMarkStyle % 5) + 1; nextMarkStyle++; }
+    t.marks = (t.marks || []).filter((m) => m.text !== text);
+    t.marks.push({ style, text });
+    applyMarks(t);
+    scheduleSession();
+  }
+  function clearMarkStyle(style) {
+    const t = activeTab;
+    if (!t) return;
+    t.marks = style ? (t.marks || []).filter((m) => m.style !== style) : [];
+    applyMarks(t);
+    scheduleSession();
+  }
+  for (const v of views) {
+    v.editor.addAction({ id: 'codeleaf.markNext', label: 'Mark with Next Colour', contextMenuGroupId: '9_marks', contextMenuOrder: 1, run: () => runCommand('markStyle', 0) });
+    v.editor.addAction({ id: 'codeleaf.clearMarks', label: 'Clear All Colour Marks', contextMenuGroupId: '9_marks', contextMenuOrder: 2, run: () => runCommand('clearMarkStyle', 0) });
+  }
+
+  // ---- Go to File ----
+  var fileListCache = { root: null, at: 0, files: [] };
+  function fuzzyScore(q, path, name) {
+    const p = path.toLowerCase(), n = name.toLowerCase();
+    if (n === q) return 1000;
+    if (n.startsWith(q)) return 800 - n.length;
+    const ni = n.indexOf(q);
+    if (ni >= 0) return 600 - ni - n.length / 10;
+    const pi = p.indexOf(q);
+    if (pi >= 0) return 400 - p.length / 20;
+    let j = 0, score = 200, last = -2;
+    for (let i = 0; i < p.length && j < q.length; i++) {
+      if (p[i] === q[j]) { score += i === last + 1 ? 3 : 0; last = i; j++; }
+    }
+    return j === q.length ? score - p.length / 10 : -1;
+  }
+  async function quickOpen() {
+    const root = settings.workspace;
+    let files = [];
+    if (root) {
+      if (fileListCache.root !== root || Date.now() - fileListCache.at > 30000) {
+        fileListCache = { root, at: Date.now(), files: await api.invoke('list-files', root) };
+      }
+      files = fileListCache.files;
+    }
+    const seen = new Set(files);
+    for (const t of tabs) if (t.path && !seen.has(t.path)) { files = [t.path, ...files]; seen.add(t.path); }
+    const rel = (p) => (root && p.startsWith(root) ? p.slice(root.length).replace(/^[\\/]/, '') : p);
+    openModal('Go to File', `
+      <input type="text" id="qo-input" spellcheck="false" placeholder="${root ? 'Type part of a file name…' : 'Type to filter open files…'}">
+      <div class="qo-list" id="qo-list"></div>
+      ${root ? '' : '<div class="hint">Tip: open a folder (File → Open Folder as Workspace) to search all of its files.</div>'}`,
+    [{ label: 'Close', value: null }], { width: 620 });
+    const box = modalStack[modalStack.length - 1];
+    const input = box.box.querySelector('#qo-input');
+    const listEl = box.box.querySelector('#qo-list');
+    let shown = [], sel = 0;
+    const draw = () => {
+      const q = input.value.trim().toLowerCase().replace(/\\/g, '/');
+      if (!q) shown = files.slice(0, 60).map((p) => ({ p, s: 0 }));
+      else {
+        shown = [];
+        for (const p of files) {
+          const s = fuzzyScore(q, rel(p).replace(/\\/g, '/'), basename(p));
+          if (s >= 0) shown.push({ p, s });
+        }
+        shown.sort((a, b) => b.s - a.s);
+        shown = shown.slice(0, 60);
+      }
+      sel = Math.min(sel, Math.max(0, shown.length - 1));
+      listEl.innerHTML = shown.length ? '' : `<div class="qo-empty">${files.length ? 'No matching files.' : 'No files to show.'}</div>`;
+      shown.forEach((it, i) => {
+        const row = document.createElement('div');
+        row.className = 'qo-item' + (i === sel ? ' sel' : '');
+        row.innerHTML = '<span class="qo-name"></span><span class="qo-path"></span>';
+        row.querySelector('.qo-name').textContent = basename(it.p);
+        row.querySelector('.qo-path').textContent = rel(it.p);
+        row.addEventListener('mousedown', (e) => { e.preventDefault(); choose(i); });
+        listEl.appendChild(row);
+      });
+      const cur = listEl.querySelector('.qo-item.sel');
+      if (cur) cur.scrollIntoView({ block: 'nearest' });
+    };
+    const choose = (i) => { const it = shown[i]; if (!it) return; box.close(null); openFiles([it.p]); };
+    input.addEventListener('input', () => { sel = 0; draw(); });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') { e.preventDefault(); sel = Math.min(shown.length - 1, sel + 1); draw(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); sel = Math.max(0, sel - 1); draw(); }
+      else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); choose(sel); }
+    });
+    draw();
+    input.focus();
+  }
+
+  // ---- Developer helpers ----
+  async function showHash(algo) {
+    const m = model();
+    if (!m) return;
+    const sels = editor.getSelections().filter((s) => !s.isEmpty());
+    const text = sels.length ? sels.map((s) => m.getValueInRange(s)).join(m.getEOL()) : m.getValue();
+    const label = { md5: 'MD5', sha1: 'SHA-1', sha256: 'SHA-256', sha512: 'SHA-512' }[algo] || algo;
+    const hex = await api.invoke('hash', algo, text);
+    openModal(`${label} hash`, `
+      <div class="hint">Of the ${sels.length ? 'selected text' : 'whole document'} (${fmt(text.length)} characters, UTF-8)</div>
+      <div class="hash-out">${escapeHtml(hex)}</div>`,
+    [{ label: 'Close', value: null }, { label: 'Copy', primary: true, onClick: (ctx) => { api.send('clipboard-write', hex); ctx.close(true); } }]);
+  }
+
+  function toast(text) {
+    const n = document.createElement('div');
+    n.textContent = text;
+    n.style.cssText = 'position:fixed;left:50%;top:18px;transform:translateX(-50%);background:var(--panel);color:var(--text);' +
+      'border:1px solid var(--border);box-shadow:var(--shadow);padding:8px 14px;border-radius:8px;z-index:60;font-size:12.5px;transition:opacity .4s';
+    document.body.appendChild(n);
+    setTimeout(() => { n.style.opacity = '0'; }, 2200);
+    setTimeout(() => n.remove(), 2700);
+  }
+  function toggleZen() {
+    state.zen = !document.body.classList.contains('zen');
+    document.body.classList.toggle('zen', state.zen);
+    if (state.zen) toast(`Distraction-free mode — press ${isMac ? '⌥⌘Z' : 'Ctrl+Alt+Z'} to exit`);
+    pushEditorState();
+    editor.focus();
+  }
+
+  var featuresReady = true;
+
 
   // ---- Search results panel ----
   function highlightLine(text, ranges) {
@@ -2178,6 +2658,10 @@
         ['Search Results Panel', 'F7'], ['Next / Previous Tab', k('Ctrl+Tab / ⌥⌘→', 'Ctrl+Tab / Ctrl+Shift+Tab')], ['Go to Tab 1–9', M + '1…9'],
         ['Command Palette', 'F1'], ['Toggle Dark / Light Mode', SH + M + 'D'],
       ],
+      'New in 1.1': [
+        ['Go to File', `${M}${AL}P`], ['Function List', `${M}${AL}L`], ['Markdown / HTML Preview', `${SH}${M}V`],
+        ['Mark with Next Colour', `${SH}${M}M`], ['Insert UUID', `${M}${AL}U`], ['Distraction-Free Mode', `${M}${AL}Z`],
+      ],
       'Split View & Compare': [
         ['Move Tab to Other View', 'right-click tab, or drag it'], ['Focus on Another View', 'F8'],
         ['Compare Files', `${M}${AL}C`], ['Compare with Saved Version', `${M}${AL}D`],
@@ -2226,6 +2710,7 @@
           mtime: t.mtime,
           view: t.view,
           viewActive: views[t.view].active === t,
+          marks: t.marks && t.marks.length ? t.marks : undefined,
         };
       }),
     };
@@ -2256,6 +2741,7 @@
       t.readOnly = !!st.readOnly;
       t.viewState = st.viewState || null;
       if (st.bookmarks && st.bookmarks.length) setBookmarks(t, st.bookmarks);
+      if (Array.isArray(st.marks) && st.marks.length) { t.marks = st.marks; applyMarks(t); }
       if (i === session.activeIndex) active = t;
       if (st.viewActive) viewActive[t.view] = t;
     }

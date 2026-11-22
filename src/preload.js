@@ -4,6 +4,7 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 const INVOKE = new Set([
   'init', 'dialog-open', 'dialog-open-folder', 'dialog-save', 'message', 'read-file', 'write-file',
   'rename-file', 'file-exists', 'readdir', 'find-in-files', 'replace-in-files', 'print', 'popup-menu',
+  'list-files', 'hash',
 ]);
 const SEND = new Set([
   'languages', 'editor-state', 'save-session', 'save-settings', 'watch-files', 'add-recent', 'reveal',

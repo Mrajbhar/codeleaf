@@ -31,6 +31,8 @@
     stop: S('<rect x="4" y="4" width="8" height="8" rx="1" fill="currentColor"/>'),
     play: S('<path d="M5 3l8 5-8 5z" fill="currentColor"/>', 'style="color:#2f9e44"'),
     playMulti: S('<path d="M2 3l6 5-6 5z" fill="currentColor"/><path d="M8 3l6 5-6 5z" fill="currentColor"/>', 'style="color:#2f9e44"'),
+    outline: S('<path d="M2 3h2M2 8h2M2 13h2"/><path d="M6 3h8M8 8h6M8 13h6"/><path d="M6 8v0"/>'),
+    preview: S('<path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/>'),
     sun: `<svg viewBox="0 0 16 16" fill="none" stroke-linecap="round">
       <circle cx="8" cy="8" r="3.2" fill="#FDB813" stroke="#F59E0B" stroke-width="1"/>
       <g stroke="#F59E0B" stroke-width="1.4">
