@@ -417,7 +417,11 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   if (SMOKE) runSmoke(mainWindow);
-  mainWindow.once('ready-to-show', () => mainWindow.show());
+  // Show the window once the editor has rendered (the renderer sends 'app-ready'); fall back after 5s.
+  const win = mainWindow;
+  const reveal = () => { if (!win.isDestroyed() && !win.isVisible()) win.show(); };
+  win.__reveal = reveal;
+  setTimeout(reveal, 5000);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/i.test(url)) shell.openExternal(url);
@@ -449,6 +453,12 @@ function runSmoke(win) {
       if (process.env.CODELEAF_SMOKE_UPDATE) {
         try { const rel = await fetchLatestRelease(); console.log('UPDATE', JSON.stringify({ current: app.getVersion(), latest: rel.version, newer: compareVersions(rel.version, process.env.CODELEAF_SMOKE_UPDATE) > 0, download: rel.download })); }
         catch (err) { console.log('UPDATE-ERROR', err.message); }
+      }
+      if (process.env.CODELEAF_SMOKE_SELFUPDATE) {
+        const rel = await fetchLatestRelease();
+        console.log('SELFUPDATE installing', rel.version, rel.zip && rel.zip.name);
+        await installMacUpdate(rel);
+        return;
       }
       const script = process.env.CODELEAF_SMOKE_JS || '';
       if (script) await wc.executeJavaScript(fs.readFileSync(script, 'utf8'));
@@ -966,7 +976,14 @@ async function fetchLatestRelease() {
   const pick = isMac
     ? assets.find((a) => a.name.endsWith(`-${process.arch}.dmg`)) || assets.find((a) => a.name.endsWith('.dmg'))
     : isWin ? assets.find((a) => a.name.endsWith('.exe')) : assets.find((a) => a.name.endsWith('.AppImage'));
-  return { version, notes: rel.body || '', page: rel.html_url, download: pick ? pick.browser_download_url : rel.html_url };
+  const zip = isMac ? assets.find((a) => a.name.endsWith(`-${process.arch}.zip`)) : null;
+  const yml = isMac ? assets.find((a) => a.name === 'latest-mac.yml') : null;
+  return {
+    version, notes: rel.body || '', page: rel.html_url,
+    download: pick ? pick.browser_download_url : rel.html_url,
+    zip: zip ? { url: zip.browser_download_url, name: zip.name, size: zip.size } : null,
+    checksums: yml ? yml.browser_download_url : null,
+  };
 }
 
 function showUpToDate() {
@@ -995,6 +1012,80 @@ function getUpdater() {
   return updater;
 }
 
+// The running .app bundle, if it is in a folder we can write to (not a read-only disk image or a
+// quarantined "translocated" copy).
+function macBundlePath() {
+  if (!isMac || !app.isPackaged) return null;
+  const bundle = path.resolve(process.execPath, '..', '..', '..');
+  if (!bundle.endsWith('.app') || bundle.includes('/AppTranslocation/') || bundle.startsWith('/Volumes/')) return null;
+  try { fs.accessSync(path.dirname(bundle), fs.constants.W_OK); fs.accessSync(bundle, fs.constants.W_OK); } catch { return null; }
+  return bundle;
+}
+
+function notify(text) { send('menu', 'toast', text); }
+
+// Download the new version's zip, check it against the release's SHA-512 list, unpack it and swap
+// it in after this process exits. Files that the app downloads itself are not quarantined by macOS,
+// so the updated app opens without a Gatekeeper prompt.
+async function installMacUpdate(rel) {
+  const bundle = macBundlePath();
+  if (!bundle) throw new Error('This copy of the app cannot be replaced (move it to the Applications folder first).');
+  const { execFileSync } = require('child_process');
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'codeleaf-update-'));
+  const zipPath = path.join(work, 'update.zip');
+
+  notify(`Downloading ${APP_NAME} ${rel.version}…`);
+  const res = await net.fetch(rel.zip.url);
+  if (!res.ok || !res.body) throw new Error(`Download failed (HTTP ${res.status}).`);
+  const total = Number(res.headers.get('content-length')) || rel.zip.size || 0;
+  const out = fs.createWriteStream(zipPath);
+  const reader = res.body.getReader();
+  let got = 0, nextStep = 25;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    got += value.length;
+    if (!out.write(Buffer.from(value))) await new Promise((r) => out.once('drain', r));
+    if (total && (got / total) * 100 >= nextStep && nextStep < 100) { notify(`Downloading update… ${nextStep}%`); nextStep += 25; }
+  }
+  await new Promise((resolve, reject) => out.end((err) => (err ? reject(err) : resolve())));
+
+  if (rel.checksums) {
+    const yml = await (await net.fetch(rel.checksums)).text();
+    const block = yml.split(/\n\s*-\s+url:\s*/).find((b) => b.startsWith(rel.zip.name));
+    const expected = block && (block.match(/sha512:\s*(\S+)/) || [])[1];
+    if (expected) {
+      const actual = require('crypto').createHash('sha512').update(fs.readFileSync(zipPath)).digest('base64');
+      if (actual !== expected) throw new Error('The downloaded update is damaged (checksum mismatch). Please try again.');
+    }
+  }
+
+  notify('Installing update…');
+  const unpack = path.join(work, 'new');
+  execFileSync('ditto', ['-x', '-k', zipPath, unpack]);
+  const newApp = path.join(unpack, path.basename(bundle));
+  const fallbackApp = path.join(unpack, `${APP_NAME}.app`);
+  const source = fs.existsSync(newApp) ? newApp : fallbackApp;
+  if (!fs.existsSync(source)) throw new Error('The update package did not contain the app.');
+  execFileSync('codesign', ['--verify', '--deep', source]);
+
+  const script = path.join(work, 'swap.sh');
+  fs.writeFileSync(script, [
+    '#!/bin/sh',
+    '# $1 = pid to wait for, $2 = installed app, $3 = new app, $4 = temp folder',
+    'while kill -0 "$1" 2>/dev/null; do sleep 0.2; done',
+    'rm -rf "$2.old"',
+    'if mv "$2" "$2.old"; then',
+    '  if mv "$3" "$2"; then rm -rf "$2.old"; else mv "$2.old" "$2"; fi',
+    'fi',
+    'open "$2"',
+    'rm -rf "$4"',
+  ].join('\n') + '\n', { mode: 0o755 });
+  spawn('/bin/sh', [script, String(process.pid), bundle, source, work], { detached: true, stdio: 'ignore' }).unref();
+  isQuitting = true;
+  app.quit();
+}
+
 async function checkForUpdates(manual) {
   if (!manual) {
     if (SMOKE || !app.isPackaged || settings.checkForUpdates === false) return;
@@ -1020,15 +1111,26 @@ async function checkForUpdates(manual) {
     if (!rel.version || compareVersions(rel.version, app.getVersion()) <= 0) { if (manual) showUpToDate(); return; }
     if (!manual && settings.skippedVersion === rel.version) return;
     const notes = rel.notes.replace(/\r/g, '').trim();
+    const canSelfInstall = isMac && rel.zip && macBundlePath();
     const r = await dialog.showMessageBox(mainWindow, {
       type: 'info',
       message: `${APP_NAME} ${rel.version} is available`,
-      detail: `You have version ${app.getVersion()}.` + (notes ? `\n\n${notes.slice(0, 700)}${notes.length > 700 ? '…' : ''}` : '') +
-        (isMac ? '\n\nDownload the new version, then drag it into Applications to replace this one.' : ''),
-      buttons: ['Download', 'Skip This Version', 'Later'], defaultId: 0, cancelId: 2,
+      detail: `You have version ${app.getVersion()}.` + (notes ? `\n\n${notes.slice(0, 700)}${notes.length > 700 ? '…' : ''}` : ''),
+      buttons: canSelfInstall ? ['Install and Restart', 'Skip This Version', 'Later'] : ['Download', 'Skip This Version', 'Later'],
+      defaultId: 0, cancelId: 2,
     });
-    if (r.response === 0) shell.openExternal(rel.download);
-    else if (r.response === 1) { settings.skippedVersion = rel.version; saveSettings(); }
+    if (r.response === 0) {
+      if (canSelfInstall) {
+        try { await installMacUpdate(rel); } catch (err) {
+          const r2 = await dialog.showMessageBox(mainWindow, {
+            type: 'warning', message: 'The update could not be installed automatically',
+            detail: `${(err && err.message) || err}\n\nYou can download it and drag it into Applications instead.`,
+            buttons: ['Download', 'Cancel'], defaultId: 0, cancelId: 1,
+          });
+          if (r2.response === 0) shell.openExternal(rel.download);
+        }
+      } else shell.openExternal(rel.download);
+    } else if (r.response === 1) { settings.skippedVersion = rel.version; saveSettings(); }
   } catch (err) {
     if (manual) dialog.showErrorBox('Could not check for updates', String((err && err.message) || err));
   }
@@ -1055,6 +1157,10 @@ ipcMain.handle('init', () => {
 });
 
 ipcMain.on('languages', (e, list) => { languages = list; buildMenu(); });
+ipcMain.on('app-ready', (e) => {
+  const w = BrowserWindow.fromWebContents(e.sender);
+  if (w && w.__reveal) w.__reveal();
+});
 ipcMain.on('editor-state', (e, state) => { editorState = state; buildMenu(); });
 
 ipcMain.on('save-session-sync', (e, session) => { writeJSON(SESSION_FILE, session); e.returnValue = true; });

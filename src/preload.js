@@ -9,7 +9,7 @@ const INVOKE = new Set([
 const SEND = new Set([
   'languages', 'editor-state', 'save-session', 'save-settings', 'watch-files', 'add-recent', 'reveal',
   'open-external', 'open-path', 'clipboard-write', 'open-terminal', 'run-command', 'window-state',
-  'close-window', 'cancel-find', 'edit-role',
+  'close-window', 'cancel-find', 'edit-role', 'app-ready',
 ]);
 const ON = new Set(['menu', 'open-paths', 'file-changed']);
 

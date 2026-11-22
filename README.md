@@ -6,6 +6,26 @@ features everywhere.
 
 **[⬇ Download the latest version](https://github.com/Mrajbhar/codeleaf/releases/latest)**
 
+### Install on macOS (recommended)
+
+Paste this into **Terminal**. It picks the right build for your Mac (Apple Silicon or Intel), checks
+its SHA-512 checksum and installs it into Applications, with no security prompt:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Mrajbhar/codeleaf/main/install.sh | bash
+```
+
+If you download the `.dmg` from the releases page instead, macOS may say it *"could not verify
+Codeleaf is free of malware"*. That message appears for every app that isn't notarized by Apple, which
+costs $99/year. To open it anyway: open Codeleaf once, then go to **System Settings → Privacy & Security**
+and click **Open Anyway**. Updates after that install themselves without the prompt.
+
+### Install on Windows / Linux
+
+Download `Codeleaf-Setup-<version>.exe` (Windows) or the `.AppImage` (Linux) from the
+[releases page](https://github.com/Mrajbhar/codeleaf/releases/latest). On Windows, SmartScreen may show
+*"Windows protected your PC"*: click **More info → Run anyway**.
+
 Built with Electron and the Monaco editor engine.
 
 ## Run from source
@@ -37,13 +57,13 @@ git tag v1.0.2
 git push && git push --tags
 ```
 
-Installed copies check for updates once a day (Help → Check for Updates… checks now). Windows and
-Linux download and install updates themselves. On macOS, the app offers to download the new
-version, because unsigned Mac apps can't replace themselves.
+Installed copies check for updates once a day (Help → Check for Updates… checks now) and install
+them with one click: Windows and Linux through electron-updater, macOS by downloading the new build,
+checking its SHA-512 checksum and swapping it in on restart.
 
-The Mac app is ad-hoc signed. If you copy it to another Mac, right-click it and choose **Open** the
-first time. The Windows installer is unsigned, so SmartScreen shows **More info → Run anyway** the
-first time.
+To remove the macOS security warning entirely, join the Apple Developer Program and add the secrets
+listed in `.github/workflows/release.yml` to the repository; the next release is then signed and
+notarized automatically.
 
 ## Features
 

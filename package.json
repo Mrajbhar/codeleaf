@@ -19,9 +19,9 @@
   },
   "scripts": {
     "start": "electron .",
-    "dist:mac": "electron-builder --mac --arm64 --x64",
+    "dist:mac": "electron-builder --mac --arm64 --x64 -c.mac.identity=null",
     "dist:win": "electron-builder --win --x64 --arm64",
-    "dist": "electron-builder --mac --arm64 --x64 && electron-builder --win --x64 --arm64",
+    "dist": "electron-builder --mac --arm64 --x64 -c.mac.identity=null && electron-builder --win --x64 --arm64",
     "prestart": "node scripts/dev-branding.js",
     "postinstall": "node scripts/dev-branding.js",
     "dist:linux": "electron-builder --linux",
@@ -112,7 +112,6 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "build/icon.png",
-      "identity": null,
       "hardenedRuntime": false,
       "target": [
         {

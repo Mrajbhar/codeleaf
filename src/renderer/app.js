@@ -1422,6 +1422,7 @@
       case 'clearMarkStyle': clearMarkStyle(arg); break;
       case 'quickOpen': await quickOpen(); break;
       case 'toggleZen': toggleZen(); break;
+      case 'toast': toast(String(arg)); break;
       case 'togglePanel': {
         const open = settings.showSidebar && (settings.sidebarPanel === 'outline' ? 'outline' : 'files') === arg;
         setSidebarPanel(arg, !open);
@@ -2792,6 +2793,8 @@
   updateStatus();
   updateWindowState();
   $('#loading').remove();
+  window.__readyAt = performance.now();
+  requestAnimationFrame(() => api.send('app-ready'));
   if (init.smoke) window.__np = { execute, tabs, editor, settings, state, bookmarkLines, get active() { return activeTab; }, get comparing() { return !!cmp; }, views, isDirty, monaco };
   editor.focus();
 })().catch((err) => {

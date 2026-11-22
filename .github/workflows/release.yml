@@ -49,10 +49,40 @@ jobs:
             exit 1
           fi
 
+      # macOS signing: add these repository secrets (Settings → Secrets and variables → Actions)
+      # once you have an Apple Developer account, and the "unverified developer" warning disappears:
+      #   MAC_CERT_P12_BASE64      Developer ID Application certificate (.p12), base64-encoded
+      #   MAC_CERT_PASSWORD        password of that .p12
+      #   APPLE_ID                 your Apple ID e-mail
+      #   APPLE_APP_PASSWORD       app-specific password from appleid.apple.com
+      #   APPLE_TEAM_ID            10-character team ID
+      # Without them the Mac app is ad-hoc signed, exactly as before.
       - name: Build installers
-        run: npx electron-builder ${{ matrix.args }} --publish never
+        shell: bash
+        run: |
+          ARGS="${{ matrix.args }} --publish never"
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            if [ -n "$CSC_LINK" ]; then
+              echo "Signing with Developer ID"
+              ARGS="$ARGS -c.mac.hardenedRuntime=true -c.mac.entitlements=build/entitlements.mac.plist -c.mac.entitlementsInherit=build/entitlements.mac.plist"
+              if [ -n "$APPLE_ID" ]; then ARGS="$ARGS -c.mac.notarize=true"; echo "Notarizing with Apple"; fi
+            else
+              echo "No Apple certificate configured: ad-hoc signing"
+              ARGS="$ARGS -c.mac.identity=null"
+              export CSC_IDENTITY_AUTO_DISCOVERY=false
+              unset CSC_LINK CSC_KEY_PASSWORD
+            fi
+          else
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+            unset CSC_LINK CSC_KEY_PASSWORD
+          fi
+          npx electron-builder $ARGS
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          CSC_LINK: ${{ secrets.MAC_CERT_P12_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       - name: Smoke-test the Windows build
         if: runner.os == 'Windows'
@@ -103,7 +133,14 @@ jobs:
           | Windows (64-bit and ARM) | \`Codeleaf-Setup-${VERSION}.exe\` |
           | Linux | \`Codeleaf-${VERSION}-x86_64.AppImage\` |
 
-          **First launch:** macOS: right-click Codeleaf → Open. Windows: if SmartScreen appears, click *More info → Run anyway*.
+          **Easiest on macOS** (installs the right version with no security prompt), paste into Terminal:
+          \`\`\`
+          curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/install.sh | bash
+          \`\`\`
+
+          **If you download the .dmg instead:** macOS may say it "could not verify Codeleaf is free of malware" because the app is not yet notarized by Apple.
+          Open it once, then go to *System Settings → Privacy & Security* and click **Open Anyway**. Updates after that install themselves.
+          Windows: if SmartScreen appears, click *More info → Run anyway*.
           Linux: \`chmod +x\` the AppImage, then run it.
           EOF
           gh release create "$GITHUB_REF_NAME" dist/* \
