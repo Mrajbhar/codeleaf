@@ -1,7 +1,10 @@
 # Codeleaf
 
 A fast, tabbed text and source code editor in the spirit of Notepad++. It runs natively on
-**macOS (Apple Silicon M1–M4)** and **Windows (x64 and ARM64)**, with the same features on both.
+**macOS (Apple Silicon and Intel)**, **Windows (x64 and ARM64)** and **Linux**, with the same
+features everywhere.
+
+**[⬇ Download the latest version](https://github.com/Mrajbhar/codeleaf/releases/latest)**
 
 Built with Electron and the Monaco editor engine.
 
@@ -19,13 +22,28 @@ npm start
 
 | Command | Output (in `dist/`) |
 | --- | --- |
-| `npm run dist:mac` | `Codeleaf-1.0.0-arm64.dmg` and `.zip` (Apple Silicon) |
-| `npm run dist:mac-intel` | Intel Mac build |
-| `npm run dist:win` | `Codeleaf Setup 1.0.0.exe` (one installer for x64 and ARM64) |
+| `npm run dist:mac` | `Codeleaf-<version>-arm64.dmg` (Apple Silicon) and `-x64.dmg` (Intel) |
+| `npm run dist:win` | `Codeleaf-Setup-<version>.exe` (one installer for x64 and ARM64) |
+| `npm run dist:linux` | `Codeleaf-<version>-x86_64.AppImage` |
+
+## Releasing a new version
+
+GitHub Actions builds every platform and publishes the release:
+
+```bash
+npm version 1.0.2 --no-git-tag-version   # bump the version
+git commit -am "Release 1.0.2"
+git tag v1.0.2
+git push && git push --tags
+```
+
+Installed copies check for updates once a day (Help → Check for Updates… checks now). Windows and
+Linux download and install updates themselves. On macOS, the app offers to download the new
+version, because unsigned Mac apps can't replace themselves.
 
 The Mac app is ad-hoc signed. If you copy it to another Mac, right-click it and choose **Open** the
-first time, or run `xattr -cr /Applications/Codeleaf.app`. The Windows installer is unsigned, so
-SmartScreen shows **More info → Run anyway** the first time.
+first time. The Windows installer is unsigned, so SmartScreen shows **More info → Run anyway** the
+first time.
 
 ## Features
 
@@ -52,6 +70,8 @@ SmartScreen shows **More info → Run anyway** the first time.
 - **Detects changes from other programs**, plus read-only mode, zoom and print
 - **Run** menu with `$(FULL_CURRENT_PATH)`-style variables; launch in browser; open in Terminal or Finder/Explorer
 - Light and dark themes (or follow the system), a Preferences dialog, and a Notepad++-style status bar
+- **Crash-safe**: unsaved text is backed up within a second of every change
+- **Automatic updates** from GitHub Releases
 
 Keyboard shortcuts are listed under **Help → Keyboard Shortcuts**. On Windows they match Notepad++
 (Ctrl+D, Ctrl+L, Ctrl+Q, Ctrl+H, F3, Ctrl+F2…). On macOS they use the standard ⌘ equivalents.

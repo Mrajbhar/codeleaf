@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, Menu, ipcMain, dialog, shell, nativeTheme, clipboard } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, shell, nativeTheme, clipboard, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -66,6 +66,9 @@ const DEFAULT_SETTINGS = {
   compareSideBySide: true,
   resultsHeight: 200,
   lastMacro: null,
+  checkForUpdates: true,
+  lastUpdateCheck: 0,
+  skippedVersion: '',
   windowBounds: null,
   workspace: null,
 };
@@ -437,6 +440,10 @@ function runSmoke(win) {
   wc.on('console-message', (e, level, msg, line, src) => console.log(`[renderer:${level}] ${msg} (${src}:${line})`));
   wc.on('did-finish-load', () => setTimeout(async () => {
     try {
+      if (process.env.CODELEAF_SMOKE_UPDATE) {
+        try { const rel = await fetchLatestRelease(); console.log('UPDATE', JSON.stringify({ current: app.getVersion(), latest: rel.version, newer: compareVersions(rel.version, process.env.CODELEAF_SMOKE_UPDATE) > 0, download: rel.download })); }
+        catch (err) { console.log('UPDATE-ERROR', err.message); }
+      }
       const script = process.env.CODELEAF_SMOKE_JS || '';
       if (script) await wc.executeJavaScript(fs.readFileSync(script, 'utf8'));
       await new Promise(r => setTimeout(r, 1500));
@@ -517,6 +524,7 @@ function buildMenu() {
       label: APP_NAME,
       submenu: [
         { label: `About ${APP_NAME}`, click: showAbout },
+        { label: 'Check for Updates…', click: () => checkForUpdates(true) },
         { type: 'separator' },
         { label: 'Settings…', accelerator: 'Cmd+,', click: cmd('preferences') },
         { type: 'separator' },
@@ -873,6 +881,11 @@ function buildMenu() {
       { label: 'Command Palette…', click: cmd('ed', 'editor.action.quickCommand') },
       { type: 'separator' },
       { label: 'Open Settings Folder', click: () => shell.openPath(userDir) },
+      { type: 'separator' },
+      { label: 'Check for Updates…', click: () => checkForUpdates(true) },
+      { label: `${APP_NAME} on GitHub`, click: () => shell.openExternal(`https://github.com/${UPDATE_REPO}`) },
+      { label: 'Release Notes', click: () => shell.openExternal(`https://github.com/${UPDATE_REPO}/releases`) },
+      { label: 'Report a Problem…', click: () => shell.openExternal(`https://github.com/${UPDATE_REPO}/issues/new`) },
       ...(isMac ? [] : [{ type: 'separator' }, { label: `About ${APP_NAME}`, accelerator: 'F1', registerAccelerator: false, click: showAbout }]),
     ],
   });
@@ -891,6 +904,102 @@ function showAbout() {
       `Editor engine: Monaco Editor`,
     buttons: ['OK'],
   });
+}
+
+// ---------------------------------------------------------------------------
+// Updates
+// ---------------------------------------------------------------------------
+// Windows and Linux builds update themselves through electron-updater (GitHub Releases).
+// macOS builds are not signed with an Apple Developer ID, so macOS will not let them replace
+// themselves; there we compare with the latest GitHub release and offer the download instead.
+const UPDATE_REPO = 'Mrajbhar/codeleaf';
+const nativeUpdates = !isMac && app.isPackaged;
+let updater = null;
+
+function compareVersions(a, b) {
+  const pa = String(a).replace(/^v/, '').split(/[.-]/).map((n) => parseInt(n, 10) || 0);
+  const pb = String(b).replace(/^v/, '').split(/[.-]/).map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
+  return 0;
+}
+
+async function fetchLatestRelease() {
+  const res = await net.fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
+    headers: { Accept: 'application/vnd.github+json', 'User-Agent': `${APP_NAME}-Updater` },
+  });
+  if (!res.ok) throw new Error(`GitHub responded with ${res.status}`);
+  const rel = await res.json();
+  const version = String(rel.tag_name || '').replace(/^v/, '');
+  const assets = rel.assets || [];
+  const pick = isMac
+    ? assets.find((a) => a.name.endsWith(`-${process.arch}.dmg`)) || assets.find((a) => a.name.endsWith('.dmg'))
+    : isWin ? assets.find((a) => a.name.endsWith('.exe')) : assets.find((a) => a.name.endsWith('.AppImage'));
+  return { version, notes: rel.body || '', page: rel.html_url, download: pick ? pick.browser_download_url : rel.html_url };
+}
+
+function showUpToDate() {
+  dialog.showMessageBox(mainWindow, { type: 'info', message: `${APP_NAME} is up to date`, detail: `You have the latest version (${app.getVersion()}).`, buttons: ['OK'] });
+}
+
+function getUpdater() {
+  if (updater !== null) return updater;
+  try {
+    updater = require('electron-updater').autoUpdater;
+    updater.autoDownload = true;
+    updater.autoInstallOnAppQuit = true;
+    updater.on('update-downloaded', async (info) => {
+      const r = await dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        message: `${APP_NAME} ${info.version} is ready to install`,
+        detail: 'Restart now to finish updating? Your open files and unsaved changes will be restored.',
+        buttons: ['Restart Now', 'Later'], defaultId: 0, cancelId: 1,
+      });
+      if (r.response === 0) { isQuitting = true; setImmediate(() => updater.quitAndInstall()); }
+    });
+  } catch (err) {
+    console.error('electron-updater unavailable', err);
+    updater = false;
+  }
+  return updater;
+}
+
+async function checkForUpdates(manual) {
+  if (!manual) {
+    if (SMOKE || !app.isPackaged || settings.checkForUpdates === false) return;
+    if (Date.now() - (settings.lastUpdateCheck || 0) < 20 * 60 * 60 * 1000) return;
+  }
+  settings.lastUpdateCheck = Date.now();
+  saveSettings();
+  try {
+    const u = nativeUpdates && getUpdater();
+    if (u) {
+      const res = await u.checkForUpdates();
+      const latest = res && res.updateInfo && res.updateInfo.version;
+      if (!latest || compareVersions(latest, app.getVersion()) <= 0) { if (manual) showUpToDate(); return; }
+      if (manual) {
+        dialog.showMessageBox(mainWindow, {
+          type: 'info', message: `Downloading ${APP_NAME} ${latest}…`,
+          detail: 'You will be asked to restart when the download has finished.', buttons: ['OK'],
+        });
+      }
+      return;
+    }
+    const rel = await fetchLatestRelease();
+    if (!rel.version || compareVersions(rel.version, app.getVersion()) <= 0) { if (manual) showUpToDate(); return; }
+    if (!manual && settings.skippedVersion === rel.version) return;
+    const notes = rel.notes.replace(/\r/g, '').trim();
+    const r = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      message: `${APP_NAME} ${rel.version} is available`,
+      detail: `You have version ${app.getVersion()}.` + (notes ? `\n\n${notes.slice(0, 700)}${notes.length > 700 ? '…' : ''}` : '') +
+        (isMac ? '\n\nDownload the new version, then drag it into Applications to replace this one.' : ''),
+      buttons: ['Download', 'Skip This Version', 'Later'], defaultId: 0, cancelId: 2,
+    });
+    if (r.response === 0) shell.openExternal(rel.download);
+    else if (r.response === 1) { settings.skippedVersion = rel.version; saveSettings(); }
+  } catch (err) {
+    if (manual) dialog.showErrorBox('Could not check for updates', String((err && err.message) || err));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1079,6 +1188,7 @@ if (!app.requestSingleInstanceLock()) {
     buildMenu();
     createWindow();
     app.on('activate', () => { if (!mainWindow) createWindow(); });
+    setTimeout(() => checkForUpdates(false), 10000);
   });
 
   app.on('before-quit', () => { isQuitting = true; });

@@ -1,13 +1,14 @@
 {
   "name": "codeleaf",
   "productName": "Codeleaf",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A fast, tabbed source code editor for macOS (Apple Silicon) and Windows",
   "main": "src/main.js",
   "author": "Codeleaf",
   "license": "MIT",
   "private": true,
   "dependencies": {
+    "electron-updater": "^6.8.11",
     "iconv-lite": "^0.7.3",
     "monaco-editor": "^0.52.2"
   },
@@ -17,12 +18,12 @@
   },
   "scripts": {
     "start": "electron .",
-    "dist:mac": "electron-builder --mac --arm64",
-    "dist:mac-intel": "electron-builder --mac --x64",
+    "dist:mac": "electron-builder --mac --arm64 --x64",
     "dist:win": "electron-builder --win --x64 --arm64",
-    "dist": "electron-builder --mac --arm64 && electron-builder --win --x64 --arm64",
+    "dist": "electron-builder --mac --arm64 --x64 && electron-builder --win --x64 --arm64",
     "prestart": "node scripts/dev-branding.js",
-    "postinstall": "node scripts/dev-branding.js"
+    "postinstall": "node scripts/dev-branding.js",
+    "dist:linux": "electron-builder --linux"
   },
   "build": {
     "appId": "com.codeleaf.editor",
@@ -37,7 +38,8 @@
       "package.json",
       "!node_modules/monaco-editor/{esm,dev,min-maps}/**",
       "!node_modules/monaco-editor/**/*.d.ts",
-      "!node_modules/monaco-editor/*.md"
+      "!node_modules/monaco-editor/*.md",
+      "build/icon.png"
     ],
     "afterPack": "build/afterPack.js",
     "fileAssociations": [
@@ -123,7 +125,8 @@
             "arm64"
           ]
         }
-      ]
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
     "dmg": {
       "title": "Codeleaf"
@@ -139,14 +142,42 @@
           ]
         }
       ],
-      "signExecutable": false
+      "signExecutable": false,
+      "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "shortcutName": "Codeleaf"
+      "shortcutName": "Codeleaf",
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Mrajbhar",
+        "repo": "codeleaf"
+      }
+    ],
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Development",
+      "icon": "build/icon.png",
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "synopsis": "Fast tabbed code editor"
     }
+  },
+  "homepage": "https://github.com/Mrajbhar/codeleaf",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Mrajbhar/codeleaf.git"
   }
 }

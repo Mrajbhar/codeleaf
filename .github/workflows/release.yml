@@ -1,0 +1,113 @@
+# Builds Codeleaf for macOS, Windows and Linux on GitHub's machines.
+# - Push a tag like v1.0.2  -> builds everything and publishes a GitHub Release.
+# - "Run workflow" button    -> builds everything and keeps the files as downloadable artifacts.
+name: Build and Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-14
+            args: --mac --arm64 --x64
+          - name: Windows
+            os: windows-latest
+            args: --win --x64 --arm64
+          - name: Linux
+            os: ubuntu-latest
+            args: --linux --x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check that the tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          PKG="v$(node -p "require('./package.json').version")"
+          if [ "$PKG" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $PKG"
+            exit 1
+          fi
+
+      - name: Build installers
+        run: npx electron-builder ${{ matrix.args }} --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Smoke-test the Windows build
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/smoke"
+          printf 'function hello() {\n  return 42;\n}\n' > "$RUNNER_TEMP/smoke/sample.js"
+          CODELEAF_SMOKE="$RUNNER_TEMP/smoke" timeout 90 ./dist/win-unpacked/Codeleaf.exe "$RUNNER_TEMP/smoke/sample.js" || true
+          test -s "$RUNNER_TEMP/smoke/shot.png" && echo "Windows build started and rendered correctly"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codeleaf-${{ matrix.name }}
+          if-no-files-found: error
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.blockmap
+            dist/latest*.yml
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - run: ls -la dist
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          cat > notes.md <<EOF
+          ## Download
+
+          | Platform | File |
+          |---|---|
+          | macOS (Apple Silicon M1–M4) | \`Codeleaf-${VERSION}-arm64.dmg\` |
+          | macOS (Intel) | \`Codeleaf-${VERSION}-x64.dmg\` |
+          | Windows (64-bit and ARM) | \`Codeleaf-Setup-${VERSION}.exe\` |
+          | Linux | \`Codeleaf-${VERSION}-x86_64.AppImage\` |
+
+          **First launch:** macOS: right-click Codeleaf → Open. Windows: if SmartScreen appears, click *More info → Run anyway*.
+          Linux: \`chmod +x\` the AppImage, then run it.
+          EOF
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Codeleaf $VERSION" \
+            --notes-file notes.md \
+            --generate-notes

@@ -7,7 +7,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-if (process.platform !== 'darwin') process.exit(0);
+if (process.platform !== 'darwin' || process.env.CI) process.exit(0);
 
 const NAME = 'Codeleaf';
 const root = path.join(__dirname, '..');

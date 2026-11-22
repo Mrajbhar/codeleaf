@@ -1307,12 +1307,22 @@
     const a = document.activeElement;
     return !!a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && !a.classList.contains('inputarea');
   }
+  // The editor that should receive commands: one side of the Compare view when it is open,
+  // otherwise the focused view's editor.
+  function targetEditor() {
+    if (cmp) {
+      const orig = cmp.diff.getOriginalEditor();
+      return orig.hasTextFocus() ? orig : cmp.diff.getModifiedEditor();
+    }
+    return editor;
+  }
   function act(id) {
-    if (!activeTab) return;
-    editor.focus();
-    const a = editor.getAction(id);
+    if (!activeTab && !cmp) return;
+    const ed = targetEditor();
+    ed.focus();
+    const a = ed.getAction(id);
     if (a) a.run();
-    else editor.trigger('codeleaf', id, null);
+    else ed.trigger('codeleaf', id, null);
   }
   function toggleSetting(key) {
     if (key === 'columnMode') {
@@ -2108,6 +2118,7 @@
         ${cb('p-detect', s.detectFileChanges, 'Detect file modifications by other programs')}
         ${cb('p-autoreload', s.autoReload, 'Reload unmodified files silently')}
         ${cb('p-line', s.highlightCurrentLine, 'Highlight current line')}
+        ${cb('p-updates', s.checkForUpdates !== false, 'Check for updates automatically')}
       </div>`,
     [
       { label: 'Cancel', value: null },
@@ -2130,6 +2141,7 @@
             detectFileChanges: c('#p-detect'),
             autoReload: c('#p-autoreload'),
             highlightCurrentLine: c('#p-line'),
+            checkForUpdates: c('#p-updates'),
           });
           applyTheme();
           applyEditorOptions();
